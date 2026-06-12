@@ -1,0 +1,12 @@
+node_modules
+.next
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+.next-dev.out.log
+.next-dev.err.log
+*.log
+.agents
+.codex

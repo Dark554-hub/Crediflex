@@ -1,0 +1,358 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum ClientStatus {
+  active
+  settled
+  delinquent
+  inactive
+
+  @@map("client_status")
+}
+
+enum CreditType {
+  daily
+  weekly
+
+  @@map("credit_type")
+}
+
+enum CreditProductType {
+  standard
+  express
+
+  @@map("credit_product_type")
+}
+
+enum CreditStatus {
+  active
+  settled
+  delinquent
+  cancelled
+
+  @@map("credit_status")
+}
+
+enum InstallmentStatus {
+  pending
+  partial
+  paid
+  overdue
+
+  @@map("installment_status")
+}
+
+enum PaymentMethod {
+  cash
+  transfer
+  other
+
+  @@map("payment_method")
+}
+
+enum CollectionItemStatus {
+  pending
+  paid
+  partial
+  missed
+  overdue
+
+  @@map("collection_item_status")
+}
+
+enum AgreementStatus {
+  active
+  completed
+  broken
+  cancelled
+
+  @@map("agreement_status")
+}
+
+model Zone {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name            String           @unique
+  description     String?
+  isActive        Boolean          @default(true) @map("is_active")
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime         @default(now()) @map("updated_at") @db.Timestamptz
+  mainProfiles    Profile[]
+  clients         Client[]
+  credits         Credit[]
+  collectionItems CollectionItem[]
+  exportJobs      ExportJob[]
+
+  @@map("zones")
+}
+
+model Profile {
+  id            String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  authUserId    String?                @unique @map("auth_user_id") @db.Uuid
+  fullName      String                 @map("full_name")
+  phone         String?
+  mainZoneId    String?                @map("main_zone_id") @db.Uuid
+  createdAt     DateTime               @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime               @default(now()) @map("updated_at") @db.Timestamptz
+  mainZone      Zone?                  @relation(fields: [mainZoneId], references: [id], onDelete: SetNull)
+  credits       Credit[]
+  payments      Payment[]
+  collectionDay CollectionDay[]
+  agreements    DelinquencyAgreement[]
+  exportJobs    ExportJob[]
+  auditLogs     AuditLog[]
+
+  @@map("profiles")
+}
+
+model Client {
+  id              String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fullName        String                 @map("full_name")
+  identification  String?
+  clientNumber    String?                @unique @map("client_number")
+  phone           String?
+  homePhone       String?                @map("home_phone")
+  email           String?
+  address         String
+  personalReferenceName    String?       @map("personal_reference_name")
+  personalReferencePhone   String?       @map("personal_reference_phone")
+  personalReferenceAddress String?       @map("personal_reference_address")
+  zoneId          String                 @map("zone_id") @db.Uuid
+  status          ClientStatus           @default(active)
+  notes           String?
+  createdAt       DateTime               @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime               @default(now()) @map("updated_at") @db.Timestamptz
+  deletedAt       DateTime?              @map("deleted_at") @db.Timestamptz
+  zone            Zone                   @relation(fields: [zoneId], references: [id], onDelete: Restrict)
+  credits         Credit[]
+  payments        Payment[]
+  collectionItems CollectionItem[]
+  agreements      DelinquencyAgreement[]
+
+  @@index([zoneId])
+  @@index([status])
+  @@map("clients")
+}
+
+model CreditSetting {
+  id                        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  defaultDailyInterestRate  Decimal  @default(0) @map("default_daily_interest_rate") @db.Decimal(8, 4)
+  defaultWeeklyInterestRate Decimal  @default(0) @map("default_weekly_interest_rate") @db.Decimal(8, 4)
+  defaultLateFeeAmount      Decimal  @default(0) @map("default_late_fee_amount") @db.Decimal(12, 2)
+  defaultLateFeeRate        Decimal  @default(0) @map("default_late_fee_rate") @db.Decimal(8, 4)
+  lateFeeGraceDays          Int      @default(0) @map("late_fee_grace_days")
+  createdAt                 DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                 DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("credit_settings")
+}
+
+model Credit {
+  id                String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId          String                 @map("client_id") @db.Uuid
+  zoneId            String                 @map("zone_id") @db.Uuid
+  productType       CreditProductType      @default(standard) @map("product_type")
+  type              CreditType
+  principalAmount   Decimal                @map("principal_amount") @db.Decimal(12, 2)
+  interestRate      Decimal                @map("interest_rate") @db.Decimal(8, 4)
+  interestAmount    Decimal                @map("interest_amount") @db.Decimal(12, 2)
+  totalAmount       Decimal                @map("total_amount") @db.Decimal(12, 2)
+  installmentCount  Int                    @map("installment_count")
+  installmentAmount Decimal                @map("installment_amount") @db.Decimal(12, 2)
+  lateFeeAmount     Decimal                @default(0) @map("late_fee_amount") @db.Decimal(12, 2)
+  lateFeeRate       Decimal                @default(0) @map("late_fee_rate") @db.Decimal(8, 4)
+  lateFeeGraceDays  Int                    @default(0) @map("late_fee_grace_days")
+  printReceiptDefault Boolean              @default(false) @map("print_receipt_default")
+  weeklyCollectionDay Int?                 @map("weekly_collection_day")
+  renewedFromCreditId String?              @map("renewed_from_credit_id") @db.Uuid
+  startDate         DateTime               @map("start_date") @db.Date
+  expectedEndDate   DateTime               @map("expected_end_date") @db.Date
+  status            CreditStatus           @default(active)
+  createdBy         String?                @map("created_by") @db.Uuid
+  createdAt         DateTime               @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime               @default(now()) @map("updated_at") @db.Timestamptz
+  settledAt         DateTime?              @map("settled_at") @db.Timestamptz
+  cancelledAt       DateTime?              @map("cancelled_at") @db.Timestamptz
+  client            Client                 @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  zone              Zone                   @relation(fields: [zoneId], references: [id], onDelete: Restrict)
+  creator           Profile?               @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  renewedFrom       Credit?                @relation("CreditRenewals", fields: [renewedFromCreditId], references: [id], onDelete: SetNull)
+  renewals          Credit[]               @relation("CreditRenewals")
+  installments      CreditInstallment[]
+  payments          Payment[]
+  collectionItems   CollectionItem[]
+  agreements        DelinquencyAgreement[]
+
+  @@index([clientId])
+  @@index([zoneId])
+  @@index([status])
+  @@index([type])
+  @@index([productType])
+  @@index([startDate])
+  @@index([renewedFromCreditId])
+  @@map("credits")
+}
+
+model CreditInstallment {
+  id                 String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  creditId           String              @map("credit_id") @db.Uuid
+  installmentNumber  Int                 @map("installment_number")
+  dueDate            DateTime            @map("due_date") @db.Date
+  scheduledAmount    Decimal             @map("scheduled_amount") @db.Decimal(12, 2)
+  principalComponent Decimal             @map("principal_component") @db.Decimal(12, 2)
+  interestComponent  Decimal             @map("interest_component") @db.Decimal(12, 2)
+  paidAmount         Decimal             @default(0) @map("paid_amount") @db.Decimal(12, 2)
+  lateFeeAmount      Decimal             @default(0) @map("late_fee_amount") @db.Decimal(12, 2)
+  status             InstallmentStatus   @default(pending)
+  paidAt             DateTime?           @map("paid_at") @db.Timestamptz
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime            @default(now()) @map("updated_at") @db.Timestamptz
+  credit             Credit              @relation(fields: [creditId], references: [id], onDelete: Cascade)
+  allocations        PaymentAllocation[]
+  collectionItems    CollectionItem[]
+
+  @@unique([creditId, installmentNumber])
+  @@index([creditId])
+  @@index([dueDate])
+  @@index([status])
+  @@map("credit_installments")
+}
+
+model Payment {
+  id          String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId    String              @map("client_id") @db.Uuid
+  creditId    String              @map("credit_id") @db.Uuid
+  paymentDate DateTime            @map("payment_date") @db.Date
+  amount      Decimal             @db.Decimal(12, 2)
+  method      PaymentMethod       @default(cash)
+  notes       String?
+  receiptGenerated Boolean        @default(true) @map("receipt_generated")
+  receivedBy  String?             @map("received_by") @db.Uuid
+  createdAt   DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime            @default(now()) @map("updated_at") @db.Timestamptz
+  cancelledAt DateTime?           @map("cancelled_at") @db.Timestamptz
+  client      Client              @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  credit      Credit              @relation(fields: [creditId], references: [id], onDelete: Restrict)
+  receiver    Profile?            @relation(fields: [receivedBy], references: [id], onDelete: SetNull)
+  allocations PaymentAllocation[]
+
+  @@index([clientId])
+  @@index([creditId])
+  @@index([paymentDate])
+  @@map("payments")
+}
+
+model PaymentAllocation {
+  id             String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paymentId      String            @map("payment_id") @db.Uuid
+  installmentId  String            @map("installment_id") @db.Uuid
+  amountApplied  Decimal           @map("amount_applied") @db.Decimal(12, 2)
+  lateFeeApplied Decimal           @default(0) @map("late_fee_applied") @db.Decimal(12, 2)
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  payment        Payment           @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  installment    CreditInstallment @relation(fields: [installmentId], references: [id], onDelete: Restrict)
+
+  @@index([paymentId])
+  @@index([installmentId])
+  @@map("payment_allocations")
+}
+
+model CollectionDay {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  collectionDate DateTime         @unique @map("collection_date") @db.Date
+  operatorId     String?          @map("operator_id") @db.Uuid
+  totalExpected  Decimal          @default(0) @map("total_expected") @db.Decimal(12, 2)
+  totalCollected Decimal          @default(0) @map("total_collected") @db.Decimal(12, 2)
+  totalPending   Decimal          @default(0) @map("total_pending") @db.Decimal(12, 2)
+  totalOverdue   Decimal          @default(0) @map("total_overdue") @db.Decimal(12, 2)
+  openedAt       DateTime         @default(now()) @map("opened_at") @db.Timestamptz
+  closedAt       DateTime?        @map("closed_at") @db.Timestamptz
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime         @default(now()) @map("updated_at") @db.Timestamptz
+  operator       Profile?         @relation(fields: [operatorId], references: [id], onDelete: SetNull)
+  items          CollectionItem[]
+
+  @@map("collection_days")
+}
+
+model CollectionItem {
+  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  collectionDayId String            @map("collection_day_id") @db.Uuid
+  clientId        String            @map("client_id") @db.Uuid
+  creditId        String            @map("credit_id") @db.Uuid
+  installmentId   String            @map("installment_id") @db.Uuid
+  zoneId          String            @map("zone_id") @db.Uuid
+  expectedAmount  Decimal           @map("expected_amount") @db.Decimal(12, 2)
+  collectedAmount Decimal           @default(0) @map("collected_amount") @db.Decimal(12, 2)
+  status          CollectionItemStatus @default(pending)
+  notes           String?
+  createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime          @default(now()) @map("updated_at") @db.Timestamptz
+  collectionDay   CollectionDay     @relation(fields: [collectionDayId], references: [id], onDelete: Cascade)
+  client          Client            @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  credit          Credit            @relation(fields: [creditId], references: [id], onDelete: Restrict)
+  installment     CreditInstallment @relation(fields: [installmentId], references: [id], onDelete: Restrict)
+  zone            Zone              @relation(fields: [zoneId], references: [id], onDelete: Restrict)
+
+  @@unique([collectionDayId, installmentId])
+  @@index([collectionDayId])
+  @@index([zoneId])
+  @@index([status])
+  @@map("collection_items")
+}
+
+model DelinquencyAgreement {
+  id                  String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId            String          @map("client_id") @db.Uuid
+  creditId            String          @map("credit_id") @db.Uuid
+  agreementDate       DateTime        @map("agreement_date") @db.Date
+  promisedPaymentDate DateTime        @map("promised_payment_date") @db.Date
+  promisedAmount      Decimal         @map("promised_amount") @db.Decimal(12, 2)
+  notes               String?
+  status              AgreementStatus @default(active)
+  createdBy           String?         @map("created_by") @db.Uuid
+  createdAt           DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime        @default(now()) @map("updated_at") @db.Timestamptz
+  client              Client          @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  credit              Credit          @relation(fields: [creditId], references: [id], onDelete: Restrict)
+  creator             Profile?        @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([creditId])
+  @@index([status])
+  @@map("delinquency_agreements")
+}
+
+model ExportJob {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  exportType String   @map("export_type")
+  dateFrom   DateTime? @map("date_from") @db.Date
+  dateTo     DateTime? @map("date_to") @db.Date
+  zoneId     String?  @map("zone_id") @db.Uuid
+  filePath   String?  @map("file_path")
+  createdBy  String?  @map("created_by") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  zone       Zone?    @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  creator    Profile? @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@map("export_jobs")
+}
+
+model AuditLog {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id") @db.Uuid
+  action      String
+  oldData     Json?    @map("old_data")
+  newData     Json?    @map("new_data")
+  performedBy String?  @map("performed_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  performer   Profile? @relation(fields: [performedBy], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}
