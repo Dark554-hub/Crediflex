@@ -106,6 +106,8 @@ model Profile {
   collectionDay CollectionDay[]
   agreements    DelinquencyAgreement[]
   exportJobs    ExportJob[]
+  expenses      Expense[]
+  financeEntries DailyFinanceEntry[]
   auditLogs     AuditLog[]
 
   @@map("profiles")
@@ -155,6 +157,7 @@ model CreditSetting {
 
 model Credit {
   id                String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  creditNumber      Int?                   @unique @default(dbgenerated("nextval('credit_number_seq'::regclass)")) @map("credit_number")
   clientId          String                 @map("client_id") @db.Uuid
   zoneId            String                 @map("zone_id") @db.Uuid
   productType       CreditProductType      @default(standard) @map("product_type")
@@ -190,6 +193,7 @@ model Credit {
   agreements        DelinquencyAgreement[]
 
   @@index([clientId])
+  @@index([creditNumber])
   @@index([zoneId])
   @@index([status])
   @@index([type])
@@ -197,6 +201,32 @@ model Credit {
   @@index([startDate])
   @@index([renewedFromCreditId])
   @@map("credits")
+}
+
+model Expense {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  expenseDate DateTime @map("expense_date") @db.Date
+  concept     String
+  amount      Decimal  @db.Decimal(12, 2)
+  createdBy   String?  @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz
+  creator     Profile? @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([expenseDate])
+  @@map("expenses")
+}
+
+model DailyFinanceEntry {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  financeDate    DateTime @unique @map("finance_date") @db.Date
+  initialCapital Decimal  @default(0) @map("initial_capital") @db.Decimal(12, 2)
+  createdBy      String?  @map("created_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz
+  creator        Profile? @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@map("daily_finance_entries")
 }
 
 model CreditInstallment {

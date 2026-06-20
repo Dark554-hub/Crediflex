@@ -5,6 +5,8 @@ import { todayInMexicoAsUtcDate } from "@/lib/dates";
 import { formatCurrency } from "@/lib/money";
 import { syncAutomaticLateFees } from "@/lib/late-fees";
 
+export const dynamic = "force-dynamic";
+
 function parseDate(value: string | null, fallback: Date) {
   if (!value) return fallback;
   const date = new Date(`${value}T00:00:00.000Z`);

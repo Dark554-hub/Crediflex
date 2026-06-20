@@ -48,6 +48,7 @@ export default async function CreditDetailPage({ params }: { params: { id: strin
   }, 0);
   const settlement = calculateSettlement(credit);
   const isExpress = credit.productType === "express";
+  const creditEffectiveness = credit.paymentEffectiveness;
 
   return (
     <main className="min-h-screen bg-field pb-24">
@@ -58,6 +59,7 @@ export default async function CreditDetailPage({ params }: { params: { id: strin
         <div className="grid grid-cols-2 gap-x-5 gap-y-3">
           {[
             ["Producto", isExpress ? "Express" : "Normal"],
+            ["Credito", `#${credit.creditNumber ?? "-"}`],
             ["Fecha", formatDate(credit.startDate)],
             ["Vencimiento", formatDate(credit.expectedEndDate)],
             ["Monto", formatCurrency(credit.principalAmount)],
@@ -102,6 +104,24 @@ export default async function CreditDetailPage({ params }: { params: { id: strin
       <div id="liquidar">
         <SettlementCalculator settlement={settlement} lateFeeAmount={pendingLateFeeAmount} />
       </div>
+
+      {credit.status === "settled" ? (
+        <section className="mx-auto mt-4 max-w-3xl rounded-md border border-line bg-white/75 p-4 sm:p-6">
+          <h2 className="text-xl font-black text-ink">Efectividad del credito liquidado</h2>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <EffectivenessMiniCard
+              title="Puntualidad"
+              percent={Math.round(creditEffectiveness.punctualityRate * 100)}
+              detail={`${creditEffectiveness.onTimeCount} de ${creditEffectiveness.accruedCount} pagos en tiempo`}
+            />
+            <EffectivenessMiniCard
+              title="Pago devengado"
+              percent={Math.round(creditEffectiveness.accruedPaymentRate * 100)}
+              detail={`${creditEffectiveness.paidAccruedCount} de ${creditEffectiveness.accruedCount} pagos cubiertos`}
+            />
+          </div>
+        </section>
+      ) : null}
 
       <section className="mx-auto mt-4 max-w-3xl rounded-md border border-line bg-white/75 p-4 sm:p-6">
         <div className="flex items-center gap-2">
@@ -285,4 +305,24 @@ export default async function CreditDetailPage({ params }: { params: { id: strin
 function weekDayLabel(day: number | null) {
   const labels = ["Domingo", "Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"];
   return typeof day === "number" ? labels[day] : "Sin dia";
+}
+
+function EffectivenessMiniCard({
+  title,
+  percent,
+  detail,
+}: {
+  title: string;
+  percent: number;
+  detail: string;
+}) {
+  return (
+    <div className="rounded-md bg-field p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-black text-stone-600">{title}</p>
+        <p className="text-3xl font-black text-moss">{percent}%</p>
+      </div>
+      <p className="mt-2 text-sm font-semibold text-stone-600">{detail}</p>
+    </div>
+  );
 }

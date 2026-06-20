@@ -226,7 +226,8 @@ export async function getOverdueInstallments() {
 }
 
 export async function getGeneralStats() {
-  const [credits, payments] = await Promise.all([
+  const today = startOfTodayUtc();
+  const [credits, payments, pendingInstallments] = await Promise.all([
     prisma.credit.findMany({
       where: {
         status: {
@@ -248,6 +249,20 @@ export async function getGeneralStats() {
         amount: true,
       },
     }),
+    prisma.creditInstallment.findMany({
+      where: {
+        dueDate: { lte: today },
+        status: { in: ["pending", "partial", "overdue"] },
+        credit: { status: { in: ["active", "delinquent"] } },
+      },
+      select: {
+        credit: {
+          select: {
+            clientId: true,
+          },
+        },
+      },
+    }),
   ]);
 
   return {
@@ -257,5 +272,7 @@ export async function getGeneralStats() {
     totalCollected: payments.reduce((total, payment) => total + Number(payment.amount), 0),
     activeCredits: credits.filter((credit) => credit.status === "active").length,
     settledCredits: credits.filter((credit) => credit.status === "settled").length,
+    pendingAccounts: new Set(pendingInstallments.map((installment) => installment.credit.clientId)).size,
+    pendingInstallments: pendingInstallments.length,
   };
 }

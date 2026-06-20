@@ -18,6 +18,7 @@ html {
 body {
   min-height: 100%;
   margin: 0;
+  padding-bottom: 5.75rem;
   color: #0e3b2e;
   font-family:
     Aptos,
@@ -34,6 +35,12 @@ body {
     linear-gradient(120deg, rgba(95, 184, 138, 0.12), transparent 30%),
     linear-gradient(210deg, rgba(31, 111, 84, 0.08), transparent 36%),
     #f6fbf7;
+}
+
+@media (min-width: 1024px) {
+  body {
+    padding-bottom: 0;
+  }
 }
 
 button,
@@ -54,6 +61,27 @@ textarea {
 button,
 a {
   touch-action: manipulation;
+}
+
+[data-loading-active="true"] {
+  pointer-events: none;
+  position: relative;
+}
+
+[data-loading-active="true"] > * {
+  opacity: 0;
+}
+
+[data-loading-active="true"]::after {
+  align-items: center;
+  color: currentColor;
+  content: "Cargando...";
+  display: flex;
+  font: inherit;
+  font-weight: 800;
+  inset: 0;
+  justify-content: center;
+  position: absolute;
 }
 
 input::placeholder,
@@ -85,5 +113,15 @@ li {
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes loading-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(220%);
   }
 }

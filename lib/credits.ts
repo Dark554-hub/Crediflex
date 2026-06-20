@@ -1,4 +1,5 @@
 import { CreditStatus, CreditType, Prisma } from "@prisma/client";
+import { calculatePaymentEffectiveness } from "@/lib/effectiveness";
 import { prisma } from "@/lib/prisma";
 import { syncAutomaticLateFees } from "@/lib/late-fees";
 
@@ -97,12 +98,22 @@ export async function getCredits(filters: CreditFilters) {
 export async function getCreditById(id: string) {
   await syncAutomaticLateFees();
 
-  return prisma.credit.findUnique({
+  const credit = await prisma.credit.findUnique({
     where: { id },
     include: {
       client: true,
       zone: true,
       installments: {
+        include: {
+          allocations: {
+            include: {
+              payment: true,
+            },
+            orderBy: {
+              createdAt: "asc",
+            },
+          },
+        },
         orderBy: {
           installmentNumber: "asc",
         },
@@ -129,4 +140,11 @@ export async function getCreditById(id: string) {
       },
     },
   });
+
+  if (!credit) return null;
+
+  return {
+    ...credit,
+    paymentEffectiveness: calculatePaymentEffectiveness(credit.installments),
+  };
 }

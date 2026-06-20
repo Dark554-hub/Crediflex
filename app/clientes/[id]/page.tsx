@@ -66,6 +66,9 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
           <div className="rounded-md border border-line bg-field p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Creditos</p>
             <p className="mt-2 text-2xl font-black text-ink">{client.credits.length}</p>
+            <p className="mt-1 text-xs font-semibold text-stone-600">
+              {activeCredits.length} activos - {settledCredits.length} liquidados
+            </p>
           </div>
           <div className="rounded-md border border-line bg-field p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-stone-500">Alta</p>
@@ -128,11 +131,20 @@ function CreditHistoryItem({
 }: {
   credit: {
     id: string;
+    creditNumber: number | null;
     type: "daily" | "weekly";
+    productType: "standard" | "express";
     status: string;
     startDate: Date;
     installmentCount: number;
     totalAmount: number | { toString(): string };
+    paymentEffectiveness?: {
+      punctualityRate: number;
+      accruedPaymentRate: number;
+      onTimeCount: number;
+      paidAccruedCount: number;
+      accruedCount: number;
+    };
   };
   muted?: boolean;
 }) {
@@ -142,11 +154,16 @@ function CreditHistoryItem({
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="font-bold text-ink">
-              {credit.type === "daily" ? "Credito diario" : "Credito semanal"}
+              #{credit.creditNumber ?? "-"} - {credit.productType === "express" ? "Express" : credit.type === "daily" ? "Credito diario" : "Credito semanal"}
             </p>
             <p className="text-sm text-stone-600">
               Inicio {formatDate(credit.startDate)} - {credit.installmentCount} pagos
             </p>
+            {credit.status === "settled" && credit.paymentEffectiveness ? (
+              <p className="mt-1 text-xs font-semibold text-stone-600">
+                Puntualidad {Math.round(credit.paymentEffectiveness.punctualityRate * 100)}% - Devengado {Math.round(credit.paymentEffectiveness.accruedPaymentRate * 100)}%
+              </p>
+            ) : null}
           </div>
           <p className="text-lg font-black text-ink">{formatCurrency(credit.totalAmount)}</p>
         </div>

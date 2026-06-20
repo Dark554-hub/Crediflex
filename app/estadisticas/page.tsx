@@ -14,6 +14,8 @@ export default async function StatsPage() {
     ["Cobrado", formatCurrency(stats.totalCollected)],
     ["Prestamos vigentes", String(stats.activeCredits)],
     ["Prestamos liquidados", String(stats.settledCredits)],
+    ["Cuentas faltantes", String(stats.pendingAccounts)],
+    ["Cuotas faltantes", String(stats.pendingInstallments)],
   ];
 
   return (

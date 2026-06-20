@@ -8,5 +8,6 @@ node_modules
 .next-dev.out.log
 .next-dev.err.log
 *.log
+*.tsbuildinfo
 .agents
 .codex
