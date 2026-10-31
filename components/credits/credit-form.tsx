@@ -54,7 +54,7 @@ export function CreditForm({ clients, zones, renewalCredit }: CreditFormProps) {
   const [rate, setRate] = useState(
     renewalCredit ? (Number(renewalCredit.interestRate) * 100).toString() : "",
   );
-  const [type, setType] = useState<"daily" | "weekly">(renewalCredit?.type ?? "daily");
+  const [type, setType] = useState<"daily" | "weekly" | "biweekly">(renewalCredit?.type ?? "daily");
   const [productType, setProductType] = useState<"standard" | "express">(
     renewalCredit?.productType === "express" ? "express" : "standard",
   );
@@ -168,11 +168,12 @@ export function CreditForm({ clients, zones, renewalCredit }: CreditFormProps) {
             <select
               name="type"
               value={type}
-              onChange={(event) => setType(event.target.value as "daily" | "weekly")}
+              onChange={(event) => setType(event.target.value as "daily" | "weekly" | "biweekly")}
               className="min-h-12 w-full rounded-md border border-line bg-white px-4 text-base outline-none transition focus:border-moss focus:ring-4 focus:ring-moss/10"
             >
               <option value="daily">Diario</option>
               <option value="weekly">Semanal</option>
+              <option value="biweekly">Quincenal</option>
             </select>
           </label>
         )}

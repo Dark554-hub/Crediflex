@@ -12,7 +12,7 @@ type CreditFormState = {
   error?: string;
 };
 
-const creditTypes = new Set<CreditType>(["daily", "weekly"]);
+const creditTypes = new Set<CreditType>(["daily", "weekly", "biweekly"]);
 const productTypes = new Set<CreditProductType>(["standard", "express"]);
 
 function cleanText(value: FormDataEntryValue | null) {
@@ -111,7 +111,7 @@ export async function createCreditAction(
     const type: CreditType = productType === "express" ? "weekly" : requestedType;
 
     if (!creditTypes.has(type)) {
-      throw new Error("Selecciona si el credito es diario o semanal.");
+      throw new Error("Selecciona si el credito es diario, semanal o quincenal.");
     }
 
     const resolvedWeeklyCollectionDay =

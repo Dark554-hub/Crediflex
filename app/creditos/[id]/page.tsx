@@ -18,6 +18,7 @@ import { calculateSettlement } from "@/lib/settlement";
 const typeLabels = {
   daily: "Diario",
   weekly: "Semanal",
+  biweekly: "Quincenal",
 };
 
 const agreementStatusLabels = {
@@ -67,7 +68,7 @@ export default async function CreditDetailPage({ params }: { params: { id: strin
             ["Intereses", formatCurrency(credit.interestAmount)],
             ["Total", formatCurrency(credit.totalAmount)],
             ["Frecuencia de Pago", typeLabels[credit.type]],
-            ["Dia de Cobro", credit.type === "weekly" ? weekDayLabel(credit.weeklyCollectionDay) : "Diario"],
+            ["Dia de Cobro", credit.type === "weekly" ? weekDayLabel(credit.weeklyCollectionDay) : credit.type === "biweekly" ? "Cada 15 dias" : "Diario"],
             ["Cantidad de Cuotas", String(credit.installmentCount)],
             [isExpress ? "Pago semanal inicial" : "Valor de Cuota", formatCurrency(credit.installmentAmount)],
             ["Cuotas Pagadas", String(credit.installments.filter((item) => item.status === "paid").length)],

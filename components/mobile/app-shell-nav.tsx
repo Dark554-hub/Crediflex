@@ -51,6 +51,7 @@ export function AppShellNav() {
               <Link
                 key={item.href}
                 href={item.href}
+                prefetch={true}
                 aria-current={active ? "page" : undefined}
                 className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-md px-1 text-[11px] font-extrabold transition duration-200 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-maize/30 ${
                   active
@@ -79,6 +80,7 @@ export function AppShellNav() {
               <Link
                 key={item.href}
                 href={item.href}
+                prefetch={true}
                 aria-current={active ? "page" : undefined}
                 className={`group relative flex h-12 w-12 items-center justify-center rounded-md transition duration-200 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-maize/30 ${
                   active

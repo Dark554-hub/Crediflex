@@ -2,6 +2,8 @@ import { ArrowLeft, MoreVertical } from "lucide-react";
 import Link from "next/link";
 import { ReactNode } from "react";
 
+import { SyncBadge } from "@/components/mobile/sync-badge";
+
 type AppBarProps = {
   title: string;
   backHref?: string;
@@ -22,7 +24,10 @@ export function AppBar({ title, backHref = "/", action }: AppBarProps) {
           </Link>
         ) : null}
         <h1 className="min-w-0 flex-1 truncate text-xl font-extrabold tracking-normal sm:text-2xl">{title}</h1>
-        {action ?? <MoreVertical size={26} aria-hidden />}
+        <div className="flex items-center gap-2">
+          <SyncBadge />
+          {action}
+        </div>
       </div>
     </header>
   );

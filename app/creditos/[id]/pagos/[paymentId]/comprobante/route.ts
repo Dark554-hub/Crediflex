@@ -12,6 +12,7 @@ const methodLabels = {
 const typeLabels = {
   daily: "Diario",
   weekly: "Semanal",
+  biweekly: "Quincenal",
 };
 
 function formatDateTime(date: Date) {

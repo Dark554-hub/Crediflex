@@ -20,6 +20,7 @@ enum ClientStatus {
 enum CreditType {
   daily
   weekly
+  biweekly
 
   @@map("credit_type")
 }

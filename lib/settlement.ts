@@ -14,7 +14,7 @@ type SettlementCredit = {
   interestAmount: unknown;
   totalAmount: unknown;
   installmentCount: number;
-  type: "daily" | "weekly";
+  type: "daily" | "weekly" | "biweekly";
   installments: SettlementInstallment[];
   payments: SettlementPayment[];
 };
@@ -74,11 +74,15 @@ export function calculateSettlement(credit: SettlementCredit) {
   const periodCount =
     credit.type === "weekly"
       ? Math.max(credit.installmentCount, 1)
-      : Math.max(Math.ceil(credit.installmentCount / 7), 1);
+      : credit.type === "biweekly"
+        ? Math.max(credit.installmentCount * 2, 1)
+        : Math.max(Math.ceil(credit.installmentCount / 7), 1);
   const elapsedWeeks =
     credit.type === "weekly"
       ? elapsedPeriods
-      : Math.max(Math.ceil(elapsedPeriods / 7), 1);
+      : credit.type === "biweekly"
+        ? Math.max(elapsedPeriods * 2, 1)
+        : Math.max(Math.ceil(elapsedPeriods / 7), 1);
   const termInterestRate = principal > 0 ? termInterest / principal : 0;
   const periodInterestRate = termInterestRate / periodCount;
   const accruedInterestRate = periodInterestRate * elapsedWeeks;

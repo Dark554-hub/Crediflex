@@ -16,12 +16,13 @@ type CreditsPageProps = {
   };
 };
 
-const creditTypes: Array<CreditType | "all"> = ["all", "daily", "weekly"];
+const creditTypes: Array<CreditType | "all"> = ["all", "daily", "weekly", "biweekly"];
 const creditStatuses: Array<CreditStatus | "all" | "open"> = ["open", "active", "delinquent", "settled", "cancelled", "all"];
 
 const typeLabels: Record<CreditType, string> = {
   daily: "Diario",
   weekly: "Semanal",
+  biweekly: "Quincenal",
 };
 
 export const dynamic = "force-dynamic";

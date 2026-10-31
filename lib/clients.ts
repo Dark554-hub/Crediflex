@@ -8,11 +8,18 @@ export type ClientFilters = {
   status?: ClientStatus | "all";
 };
 
+let cachedZones: { data: any[]; timestamp: number } | null = null;
+
 export async function getZones() {
-  return prisma.zone.findMany({
+  if (cachedZones && Date.now() - cachedZones.timestamp < 60000) {
+    return cachedZones.data;
+  }
+  const data = await prisma.zone.findMany({
     where: { isActive: true },
     orderBy: { name: "asc" },
   });
+  cachedZones = { data, timestamp: Date.now() };
+  return data;
 }
 
 export async function getClients(filters: ClientFilters) {

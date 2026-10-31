@@ -11,11 +11,29 @@ function dateKey(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
-export async function getFinanceSummary(days = 7) {
+export async function getFinanceSummary(options?: { days?: number; from?: Date; to?: Date }) {
   const today = todayInMexicoAsUtcDate();
-  const start = addDaysUtc(today, -(days - 1));
-  const endExclusive = addDaysUtc(today, 1);
-  const dates = Array.from({ length: days }, (_, index) => addDaysUtc(start, index));
+  let start: Date;
+  let endExclusive: Date;
+  let dates: Date[];
+
+  if (options?.from && options?.to) {
+    start = new Date(Date.UTC(options.from.getUTCFullYear(), options.from.getUTCMonth(), options.from.getUTCDate()));
+    const toUtc = new Date(Date.UTC(options.to.getUTCFullYear(), options.to.getUTCMonth(), options.to.getUTCDate()));
+    endExclusive = addDaysUtc(toUtc, 1);
+    
+    dates = [];
+    let curr = new Date(start);
+    while (curr < endExclusive) {
+      dates.push(new Date(curr));
+      curr = addDaysUtc(curr, 1);
+    }
+  } else {
+    const days = options?.days ?? 10;
+    start = addDaysUtc(today, -(days - 1));
+    endExclusive = addDaysUtc(today, 1);
+    dates = Array.from({ length: days }, (_, index) => addDaysUtc(start, index));
+  }
   const [capitalEntries, credits, payments, expenses] = await Promise.all([
     prisma.dailyFinanceEntry.findMany({
       where: {

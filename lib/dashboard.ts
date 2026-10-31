@@ -65,8 +65,43 @@ export async function getHomeStats() {
   return { dueToday, overdue, activeCredits, clients };
 }
 
-export async function getDashboardData() {
-  await syncAutomaticLateFees();
+export type DashboardData = {
+  today: Date;
+  activePrincipal: number;
+  collectedToday: number;
+  pendingToday: number;
+  overdueAmount: number;
+  delinquentClients: number;
+  interestCollected: number;
+  portfolioBalance: number;
+  activeCount: number;
+  settledCount: number;
+  paymentCountToday: number;
+  dueTodayCount: number;
+  overdueCount: number;
+  zoneCollections: Array<{ zoneId: string; name: string; collected: number; expected: number }>;
+  installmentsToday: any[];
+  overdueInstallments: any[];
+  upcomingInstallments: any[];
+};
+
+let cachedDashboard: {
+  data: DashboardData;
+  timestamp: number;
+} | null = null;
+
+const DASHBOARD_CACHE_TTL_MS = 15000;
+
+export function invalidateDashboardCache() {
+  cachedDashboard = null;
+}
+
+export async function getDashboardData(): Promise<DashboardData> {
+  if (cachedDashboard && Date.now() - cachedDashboard.timestamp < DASHBOARD_CACHE_TTL_MS) {
+    return cachedDashboard.data;
+  }
+
+  void syncAutomaticLateFees();
 
   const today = startOfTodayUtc();
   const tomorrow = addDaysUtc(today, 1);
@@ -156,7 +191,7 @@ export async function getDashboardData() {
       .reduce((total, installment) => total + installmentBalance(installment), 0),
   }));
 
-  return {
+  const result = {
     today,
     activePrincipal,
     collectedToday,
@@ -175,6 +210,13 @@ export async function getDashboardData() {
     overdueInstallments: overdueInstallments.slice(0, 5),
     upcomingInstallments,
   };
+
+  cachedDashboard = {
+    data: result,
+    timestamp: Date.now(),
+  };
+
+  return result;
 }
 
 export async function getInstallmentsForToday() {

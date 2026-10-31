@@ -15,6 +15,30 @@ function addDaysUtc(date: Date, days: number) {
   return next;
 }
 
+export async function unmarkCollectionItemMissedAction(formData: FormData) {
+  const itemIds = formData.getAll("itemId").map(cleanText).filter(Boolean);
+  const collectionDayId = cleanText(formData.get("collectionDayId"));
+  const clientId = cleanText(formData.get("clientId"));
+
+  if (itemIds.length === 0 || !collectionDayId) {
+    throw new Error("Registro de cobranza invalido.");
+  }
+
+  await prisma.collectionItem.updateMany({
+    where: { id: { in: itemIds } },
+    data: {
+      status: "pending",
+      notes: null,
+    },
+  });
+
+  await refreshCollectionTotals(collectionDayId);
+  revalidatePath("/cobros");
+  if (clientId) {
+    revalidatePath(`/cobros/${clientId}`);
+  }
+}
+
 export async function markCollectionItemMissedAction(formData: FormData) {
   const itemIds = formData.getAll("itemId").map(cleanText).filter(Boolean);
   const collectionDayId = cleanText(formData.get("collectionDayId"));
@@ -130,4 +154,23 @@ export async function closeCollectionDayAction(formData: FormData) {
     },
   });
   revalidatePath("/cobros");
+  revalidatePath("/jornadas");
+}
+
+export async function reopenCollectionDayAction(formData: FormData) {
+  const collectionDayId = cleanText(formData.get("collectionDayId"));
+
+  if (!collectionDayId) {
+    throw new Error("Jornada invalida.");
+  }
+
+  await prisma.collectionDay.update({
+    where: { id: collectionDayId },
+    data: {
+      closedAt: null,
+    },
+  });
+  await refreshCollectionTotals(collectionDayId);
+  revalidatePath("/cobros");
+  revalidatePath("/jornadas");
 }

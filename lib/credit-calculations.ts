@@ -81,7 +81,9 @@ export function buildAmortizationSchedule(input: AmortizationInput): Amortizatio
     const dueDate =
       input.type === "daily"
         ? addDays(input.startDate, installmentNumber)
-        : getWeeklyDueDate(input.startDate, input.weeklyCollectionDay ?? input.startDate.getUTCDay(), installmentNumber);
+        : input.type === "biweekly"
+          ? addDays(input.startDate, installmentNumber * 15)
+          : getWeeklyDueDate(input.startDate, input.weeklyCollectionDay ?? input.startDate.getUTCDay(), installmentNumber);
 
     const principalComponentCents =
       basePrincipalCents + (index >= input.installmentCount - principalRemainder ? 1 : 0);

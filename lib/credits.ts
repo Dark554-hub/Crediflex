@@ -48,7 +48,7 @@ export async function getCreditFormData(renewCreditId?: string) {
 }
 
 export async function getCredits(filters: CreditFilters) {
-  await syncAutomaticLateFees();
+  void syncAutomaticLateFees();
 
   const where: Prisma.CreditWhereInput = {};
 
@@ -96,7 +96,7 @@ export async function getCredits(filters: CreditFilters) {
 }
 
 export async function getCreditById(id: string) {
-  await syncAutomaticLateFees();
+  void syncAutomaticLateFees();
 
   const credit = await prisma.credit.findUnique({
     where: { id },

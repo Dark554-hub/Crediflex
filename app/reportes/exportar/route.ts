@@ -89,7 +89,7 @@ export async function GET(request: NextRequest) {
         Fecha: dateLabel(payment.paymentDate),
         Cliente: payment.client.fullName,
         Zona: payment.credit.zone.name,
-        Credito: payment.credit.type === "daily" ? "Diario" : "Semanal",
+        Credito: payment.credit.type === "daily" ? "Diario" : payment.credit.type === "biweekly" ? "Quincenal" : "Semanal",
         Monto: Number(payment.amount),
         Metodo: payment.method,
         Cuotas: payment.allocations.map((allocation) => allocation.installment.installmentNumber).join(", "),
@@ -118,7 +118,7 @@ export async function GET(request: NextRequest) {
         .map((installment) => ({
           Cliente: credit.client.fullName,
           Zona: credit.zone.name,
-          Credito: credit.type === "daily" ? "Diario" : "Semanal",
+          Credito: credit.type === "daily" ? "Diario" : credit.type === "biweekly" ? "Quincenal" : "Semanal",
           Pago: installment.installmentNumber,
           Vencimiento: dateLabel(installment.dueDate),
           "Monto cuota": Number(installment.scheduledAmount),
@@ -177,7 +177,7 @@ export async function GET(request: NextRequest) {
 
   const groups = new Map<string, typeof credits>();
   for (const credit of credits) {
-    const key = `${credit.zone.name} - ${credit.type === "daily" ? "Diario" : "Semanal"}`;
+    const key = `${credit.zone.name} - ${credit.type === "daily" ? "Diario" : credit.type === "biweekly" ? "Quincenal" : "Semanal"}`;
     groups.set(key, [...(groups.get(key) ?? []), credit]);
   }
 

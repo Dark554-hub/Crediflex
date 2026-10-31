@@ -10,7 +10,38 @@ const globalForLateFees = globalThis as unknown as {
   };
 };
 
-const SYNC_TTL_MS = 5 * 60 * 1000;
+const SYNC_TTL_MS = 30 * 60 * 1000;
+
+export async function syncAutomaticLateFees() {
+  const today = todayInMexicoAsUtcDate();
+  const dateKey = today.toISOString().slice(0, 10);
+  const now = Date.now();
+  const state = globalForLateFees.lateFeeSync;
+
+  if (state?.promise || (state?.dateKey === dateKey && now - state.syncedAt < SYNC_TTL_MS)) {
+    return;
+  }
+
+  // Ejecución en segundo plano para no demorar la respuesta de las páginas
+  const promise = runAutomaticLateFeeSync(today)
+    .catch((err) => {
+      console.error("[LateFees] Error en sync en segundo plano:", err);
+    })
+    .finally(() => {
+      globalForLateFees.lateFeeSync = {
+        dateKey,
+        syncedAt: Date.now(),
+      };
+    });
+
+  globalForLateFees.lateFeeSync = {
+    dateKey,
+    syncedAt: now,
+    promise,
+  };
+
+  return;
+}
 
 function daysBetweenUtcDates(from: Date, to: Date) {
   const msPerDay = 24 * 60 * 60 * 1000;
@@ -44,41 +75,7 @@ function calculateLateFee(input: {
     return 0;
   }
 
-  // Formula de mora:
-  // dias_con_mora = dias vencidos - dias de gracia.
-  // mora = cargo fijo configurado + (saldo ordinario pendiente * tasa diaria de mora * dias_con_mora).
-  // Se usa el saldo ordinario pendiente para no cobrar mora sobre pagos ya cubiertos.
   return Number(input.credit.lateFeeAmount) + ordinaryPending * Number(input.credit.lateFeeRate) * chargeableDays;
-}
-
-export async function syncAutomaticLateFees() {
-  const today = todayInMexicoAsUtcDate();
-  const dateKey = today.toISOString().slice(0, 10);
-  const now = Date.now();
-  const state = globalForLateFees.lateFeeSync;
-
-  if (state?.promise) {
-    return state.promise;
-  }
-
-  if (state?.dateKey === dateKey && now - state.syncedAt < SYNC_TTL_MS) {
-    return;
-  }
-
-  const promise = runAutomaticLateFeeSync(today).finally(() => {
-    globalForLateFees.lateFeeSync = {
-      dateKey,
-      syncedAt: Date.now(),
-    };
-  });
-
-  globalForLateFees.lateFeeSync = {
-    dateKey,
-    syncedAt: now,
-    promise,
-  };
-
-  return promise;
 }
 
 async function runAutomaticLateFeeSync(today: Date) {
@@ -184,6 +181,8 @@ async function carryForwardMissedInstallments(today: Date) {
     }
   }
 
+  const allOperations: Prisma.PrismaPromise<unknown>[] = [];
+
   for (const [creditId, firstMissed] of Array.from(firstMissedByCredit.entries())) {
     const daysToMove = daysBetweenUtcDates(firstMissed.dueDate, today);
     if (daysToMove <= 0) continue;
@@ -204,15 +203,17 @@ async function carryForwardMissedInstallments(today: Date) {
 
     if (installmentsToMove.length === 0) continue;
 
-    const operations: Prisma.PrismaPromise<unknown>[] = installmentsToMove.map((installment) =>
-      prisma.creditInstallment.update({
-        where: { id: installment.id },
-        data: {
-          dueDate: addDaysUtc(installment.dueDate, daysToMove),
-          status: installment.status === "overdue" ? "pending" : installment.status,
-        },
-      }),
-    );
+    for (const installment of installmentsToMove) {
+      allOperations.push(
+        prisma.creditInstallment.update({
+          where: { id: installment.id },
+          data: {
+            dueDate: addDaysUtc(installment.dueDate, daysToMove),
+            status: installment.status === "overdue" ? "pending" : installment.status,
+          },
+        }),
+      );
+    }
 
     const lastDueDate = installmentsToMove.reduce<Date | null>((last, installment) => {
       const movedDate = addDaysUtc(installment.dueDate, daysToMove);
@@ -220,7 +221,7 @@ async function carryForwardMissedInstallments(today: Date) {
     }, null);
 
     if (lastDueDate) {
-      operations.push(
+      allOperations.push(
         prisma.credit.update({
           where: { id: creditId },
           data: {
@@ -231,12 +232,9 @@ async function carryForwardMissedInstallments(today: Date) {
         }),
       );
     }
+  }
 
-    // Corrimiento automatico por fecha:
-    // dias_a_mover = fecha_actual - primer_pago_pendiente_vencido.
-    // Cada cuota pendiente desde ese pago se recorre los mismos dias para conservar
-    // el orden del credito. Ejemplo: si el pago del martes no se cubre, el miercoles
-    // ese pago queda para miercoles y los siguientes pagos se recorren un dia.
-    await prisma.$transaction(operations);
+  if (allOperations.length > 0) {
+    await prisma.$transaction(allOperations);
   }
 }

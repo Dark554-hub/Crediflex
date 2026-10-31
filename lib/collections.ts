@@ -29,7 +29,7 @@ function itemBalance(installment: {
 }
 
 export async function getOrCreateTodayCollection() {
-  await syncAutomaticLateFees();
+  void syncAutomaticLateFees();
 
   const today = startOfTodayUtc();
   const dateKey = today.toISOString().slice(0, 10);

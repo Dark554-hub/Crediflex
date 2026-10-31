@@ -132,7 +132,7 @@ function CreditHistoryItem({
   credit: {
     id: string;
     creditNumber: number | null;
-    type: "daily" | "weekly";
+    type: "daily" | "weekly" | "biweekly";
     productType: "standard" | "express";
     status: string;
     startDate: Date;
@@ -154,7 +154,7 @@ function CreditHistoryItem({
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="font-bold text-ink">
-              #{credit.creditNumber ?? "-"} - {credit.productType === "express" ? "Express" : credit.type === "daily" ? "Credito diario" : "Credito semanal"}
+              #{credit.creditNumber ?? "-"} - {credit.productType === "express" ? "Express" : credit.type === "daily" ? "Credito diario" : credit.type === "biweekly" ? "Credito quincenal" : "Credito semanal"}
             </p>
             <p className="text-sm text-stone-600">
               Inicio {formatDate(credit.startDate)} - {credit.installmentCount} pagos
