@@ -21,7 +21,12 @@ function dateOnlyUtc(date: Date) {
 
 export function calculatePaymentEffectiveness(installments: InstallmentForEffectiveness[]) {
   const todayKey = dateOnlyUtc(todayInMexicoAsUtcDate());
-  const accruedInstallments = installments.filter((installment) => dateOnlyUtc(installment.dueDate) <= todayKey);
+  // Solo se consideran devengadas las cuotas pasadas (< hoy), o las de hoy que YA fueron pagadas.
+  // Una cuota que vence hoy y aún está en ruta de cobro no penaliza al cliente (sigue al corriente).
+  const accruedInstallments = installments.filter((installment) => {
+    const due = dateOnlyUtc(installment.dueDate);
+    return due < todayKey || (due === todayKey && installment.status === "paid");
+  });
   const paidAccruedInstallments = accruedInstallments.filter((installment) => {
     const totalDue = Number(installment.scheduledAmount) + Number(installment.lateFeeAmount);
     return Number(installment.paidAmount) >= totalDue && installment.status === "paid";

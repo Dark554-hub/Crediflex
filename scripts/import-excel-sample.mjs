@@ -70,7 +70,7 @@ const SAMPLE_DATA = [
     freq: "semanal",
     day: 6, // Sabado
     totalCount: 16,
-    paidCount: 2,
+    paidCount: 3, // El 10 debió ser su 1er pago, 17 el 2do y 24 el 3ero (sigue al corriente)
     interestPercent: 60,
     startDate: "2026-10-10",
   },
@@ -174,16 +174,19 @@ async function main() {
       const count = cr.totalCount;
       const quota = cr.quota;
 
-      // Calcular calendario
-      const schedule = buildAmortizationSchedule({
-        principalAmount: principal,
-        interestRate,
-        installmentCount: count,
-        type: creditType,
-        productType: "standard",
-        startDate,
-        weeklyCollectionDay: cr.day,
-      });
+      function calcDueDate(start, freq, index) {
+        const d = new Date(start);
+        if (freq === "daily") {
+          d.setUTCDate(d.getUTCDate() + index);
+        } else if (freq === "biweekly") {
+          d.setUTCDate(d.getUTCDate() + (index * 14));
+        } else {
+          d.setUTCDate(d.getUTCDate() + (index * 7));
+        }
+        return d;
+      }
+
+      const expectedEndDate = calcDueDate(startDate, creditType, count - 1);
 
       const credit = await prisma.credit.create({
         data: {
@@ -199,34 +202,38 @@ async function main() {
           installmentAmount: quota,
           weeklyCollectionDay: cr.day,
           startDate,
-          expectedEndDate: schedule.expectedEndDate,
+          expectedEndDate,
           status: "active",
         },
       });
 
       console.log(`   💳 Crédito #${credit.creditNumber}: $${principal} (${creditType}, ${count} pagos de $${quota}, ${cr.paidCount} pagados)`);
 
-      // 3. Crear cuotas
+      // 3. Crear cuotas (la cuota #1 vence en startDate)
       const principalCents = Math.floor((principal * 100) / count);
       const principalRemainder = Math.round(principal * 100) % count;
 
       const installmentRecords = [];
-      for (const inst of schedule.installments) {
-        const isPaid = inst.installmentNumber <= cr.paidCount;
-        const pCents = principalCents + (inst.installmentNumber > count - principalRemainder ? 1 : 0);
+      const todayOnly = new Date();
+      todayOnly.setUTCHours(0, 0, 0, 0);
+
+      for (let i = 1; i <= count; i++) {
+        const isPaid = i <= cr.paidCount;
+        const pCents = principalCents + (i > count - principalRemainder ? 1 : 0);
         const pComponent = pCents / 100;
         const iComponent = Math.round((quota - pComponent) * 100) / 100;
+        const dueDate = calcDueDate(startDate, creditType, i - 1);
 
         installmentRecords.push({
           creditId: credit.id,
-          installmentNumber: inst.installmentNumber,
-          dueDate: inst.dueDate,
+          installmentNumber: i,
+          dueDate,
           scheduledAmount: quota,
           principalComponent: pComponent,
           interestComponent: iComponent,
           paidAmount: isPaid ? quota : 0,
-          status: isPaid ? "paid" : inst.dueDate < new Date() ? "overdue" : "pending",
-          paidAt: isPaid ? inst.dueDate : null,
+          status: isPaid ? "paid" : dueDate < todayOnly ? "overdue" : "pending",
+          paidAt: isPaid ? dueDate : null,
         });
       }
 
