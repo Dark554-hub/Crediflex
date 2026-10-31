@@ -70,7 +70,7 @@ const SAMPLE_DATA = [
     freq: "semanal",
     day: 6, // Sabado
     totalCount: 16,
-    paidCount: 3, // El 10 debió ser su 1er pago, 17 el 2do y 24 el 3ero (sigue al corriente)
+    paidCount: 2, // Basado en el PDF: 2 pagadas (10 y 17 Oct), 24 Oct vencida, 31 Oct para hoy -> 67% efectividad
     interestPercent: 60,
     startDate: "2026-10-10",
   },
