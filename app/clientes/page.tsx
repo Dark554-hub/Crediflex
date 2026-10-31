@@ -10,22 +10,34 @@ type ClientsPageProps = {
     q?: string;
     zone?: string;
     status?: ClientStatus | "all";
+    limit?: string;
   };
 };
 
 const statuses: Array<ClientStatus | "all"> = ["all", "active", "delinquent", "settled", "inactive"];
 
+const PAGE_SIZE = 30;
+
 export const dynamic = "force-dynamic";
 
 export default async function ClientsPage({ searchParams }: ClientsPageProps) {
-  const [zones, clients] = await Promise.all([
+  const limit = Math.min(Math.max(Number(searchParams.limit) || PAGE_SIZE, PAGE_SIZE), 500);
+  const [zones, fetchedClients] = await Promise.all([
     getZones(),
     getClients({
       query: searchParams.q,
       zoneId: searchParams.zone,
       status: searchParams.status ?? "all",
+      limit,
     }),
   ]);
+  const hasMore = fetchedClients.length > limit;
+  const clients = hasMore ? fetchedClients.slice(0, limit) : fetchedClients;
+  const moreParams = new URLSearchParams();
+  if (searchParams.q) moreParams.set("q", searchParams.q);
+  if (searchParams.zone) moreParams.set("zone", searchParams.zone);
+  if (searchParams.status) moreParams.set("status", searchParams.status);
+  moreParams.set("limit", String(limit + PAGE_SIZE));
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-5 sm:px-6 lg:px-8">
@@ -127,6 +139,14 @@ export default async function ClientsPage({ searchParams }: ClientsPageProps) {
             </Link>
           ))
         )}
+        {hasMore ? (
+          <Link
+            href={`/clientes?${moreParams.toString()}`}
+            className="mt-1 inline-flex min-h-12 items-center justify-center rounded-md border border-line bg-white px-5 text-sm font-extrabold text-moss shadow-soft transition hover:bg-field"
+          >
+            Mostrar mas clientes
+          </Link>
+        ) : null}
       </section>
     </main>
   );

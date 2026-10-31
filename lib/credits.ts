@@ -8,6 +8,8 @@ export type CreditFilters = {
   zoneId?: string;
   type?: CreditType | "all";
   status?: CreditStatus | "all" | "open";
+  /** Maximo de creditos a devolver. Se pide uno extra para saber si hay mas. */
+  limit?: number;
 };
 
 export async function getCreditFormData(renewCreditId?: string) {
@@ -91,6 +93,7 @@ export async function getCredits(filters: CreditFilters) {
     orderBy: {
       createdAt: "desc",
     },
+    take: filters.limit ? filters.limit + 1 : undefined,
   });
 }
 

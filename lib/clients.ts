@@ -6,6 +6,8 @@ export type ClientFilters = {
   query?: string;
   zoneId?: string;
   status?: ClientStatus | "all";
+  /** Maximo de clientes a devolver. Se pide uno extra para saber si hay mas. */
+  limit?: number;
 };
 
 let cachedZones: { data: any[]; timestamp: number } | null = null;
@@ -53,6 +55,7 @@ export async function getClients(filters: ClientFilters) {
       },
     },
     orderBy: [{ status: "asc" }, { fullName: "asc" }],
+    take: filters.limit ? filters.limit + 1 : undefined,
   });
 }
 

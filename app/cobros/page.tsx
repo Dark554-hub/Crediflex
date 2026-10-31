@@ -1,4 +1,4 @@
-import { CalendarDays, ChevronRight, CircleDollarSign } from "lucide-react";
+import { CalendarDays, ChevronRight, CircleDollarSign, Search } from "lucide-react";
 import Link from "next/link";
 import { closeCollectionDayAction, reopenCollectionDayAction } from "@/app/cobros/actions";
 import { AppBar } from "@/components/mobile/app-bar";
@@ -8,14 +8,21 @@ import { formatCurrency } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
 
-export default async function DailyCollectionsPage() {
+const PAGE_SIZE = 30;
+
+export default async function DailyCollectionsPage({
+  searchParams,
+}: {
+  searchParams: { q?: string; limit?: string };
+}) {
   const collectionDay = await getOrCreateTodayCollection();
+  const query = (searchParams.q ?? "").trim().toLowerCase();
+  const limit = Math.min(Math.max(Number(searchParams.limit) || PAGE_SIZE, PAGE_SIZE), 500);
   const visibleItems = collectionDay.items.filter((item) => {
     const balance = Math.max(Number(item.expectedAmount) - Number(item.collectedAmount), 0);
     return balance > 0 || item.status === "missed";
   });
-  const zones = Array.from(new Set(visibleItems.map((item) => item.zone.name)));
-  const clientGroups = collectionDay.items.reduce<
+  const allClientGroups = collectionDay.items.reduce<
     Array<{
       clientId: string;
       clientName: string;
@@ -50,6 +57,16 @@ export default async function DailyCollectionsPage() {
 
     return groups;
   }, []);
+
+  const matchingGroups = query
+    ? allClientGroups.filter((group) => group.clientName.toLowerCase().includes(query))
+    : allClientGroups;
+  const hasMore = matchingGroups.length > limit;
+  const clientGroups = hasMore ? matchingGroups.slice(0, limit) : matchingGroups;
+  const zones = Array.from(new Set(clientGroups.map((group) => group.zoneName)));
+  const moreParams = new URLSearchParams();
+  if (searchParams.q) moreParams.set("q", searchParams.q);
+  moreParams.set("limit", String(limit + PAGE_SIZE));
 
   return (
     <main className="min-h-screen bg-field pb-8">
@@ -94,12 +111,34 @@ export default async function DailyCollectionsPage() {
         )}
       </section>
 
+      <section className="mx-auto max-w-4xl px-4 pb-2">
+        <form className="relative" action="/cobros">
+          <Search
+            size={18}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-stone-500"
+            aria-hidden
+          />
+          <input
+            name="q"
+            defaultValue={searchParams.q ?? ""}
+            className="min-h-12 w-full rounded-md border border-line bg-white px-10 text-base outline-none transition focus:border-moss focus:ring-4 focus:ring-moss/10"
+            placeholder="Buscar cliente en ruta..."
+          />
+        </form>
+      </section>
+
       <section className="mx-auto max-w-4xl px-4">
         {visibleItems.length === 0 ? (
           <div className="rounded-md border border-dashed border-line bg-white px-5 py-10 text-center">
             <CalendarDays className="mx-auto text-moss" size={38} aria-hidden />
             <h2 className="mt-3 text-xl font-extrabold text-ink">No hay cobros pendientes</h2>
             <p className="mt-1 text-sm text-stone-600">Las cuotas de hoy o vencidas apareceran aqui.</p>
+          </div>
+        ) : matchingGroups.length === 0 ? (
+          <div className="rounded-md border border-dashed border-line bg-white px-5 py-10 text-center">
+            <Search className="mx-auto text-stone-400" size={32} aria-hidden />
+            <h2 className="mt-3 text-lg font-bold text-ink">{`Sin resultados para "${query}"`}</h2>
+            <p className="mt-1 text-sm text-stone-600">Verifica el nombre del cliente.</p>
           </div>
         ) : (
           <div className="grid gap-4">
@@ -149,6 +188,14 @@ export default async function DailyCollectionsPage() {
                 </div>
               );
             })}
+            {hasMore ? (
+              <Link
+                href={`/cobros?${moreParams.toString()}`}
+                className="inline-flex min-h-12 items-center justify-center rounded-md border border-line bg-white px-5 text-sm font-extrabold text-moss shadow-soft transition hover:bg-field"
+              >
+                Mostrar mas clientes en cobro
+              </Link>
+            ) : null}
           </div>
         )}
       </section>

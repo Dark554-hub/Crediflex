@@ -13,6 +13,7 @@ type CreditsPageProps = {
     zone?: string;
     type?: CreditType | "all";
     status?: CreditStatus | "all" | "open";
+    limit?: string;
   };
 };
 
@@ -25,18 +26,30 @@ const typeLabels: Record<CreditType, string> = {
   biweekly: "Quincenal",
 };
 
+const PAGE_SIZE = 30;
+
 export const dynamic = "force-dynamic";
 
 export default async function CreditsPage({ searchParams }: CreditsPageProps) {
-  const [zones, credits] = await Promise.all([
+  const limit = Math.min(Math.max(Number(searchParams.limit) || PAGE_SIZE, PAGE_SIZE), 500);
+  const [zones, fetchedCredits] = await Promise.all([
     getZones(),
     getCredits({
       query: searchParams.q,
       zoneId: searchParams.zone,
       type: searchParams.type ?? "all",
       status: searchParams.status ?? "open",
+      limit,
     }),
   ]);
+  const hasMore = fetchedCredits.length > limit;
+  const credits = hasMore ? fetchedCredits.slice(0, limit) : fetchedCredits;
+  const moreParams = new URLSearchParams();
+  if (searchParams.q) moreParams.set("q", searchParams.q);
+  if (searchParams.zone) moreParams.set("zone", searchParams.zone);
+  if (searchParams.type) moreParams.set("type", searchParams.type);
+  if (searchParams.status) moreParams.set("status", searchParams.status);
+  moreParams.set("limit", String(limit + PAGE_SIZE));
   const expressCount = credits.filter((credit) => credit.productType === "express").length;
   const standardCount = credits.length - expressCount;
 
@@ -50,7 +63,7 @@ export default async function CreditsPage({ searchParams }: CreditsPageProps) {
             Consulta prestamos, saldos y pagos pendientes.
           </p>
           <p className="mt-2 text-sm font-semibold text-stone-700">
-            {credits.length} credito{credits.length === 1 ? "" : "s"}: {standardCount} normal{standardCount === 1 ? "" : "es"} y {expressCount} express.
+            {credits.length}{hasMore ? "+" : ""} credito{credits.length === 1 ? "" : "s"}: {standardCount} normal{standardCount === 1 ? "" : "es"} y {expressCount} express.
           </p>
           <Link href="/clientes" className="mt-2 inline-flex text-sm font-semibold text-moss">
             Ver clientes
@@ -187,6 +200,14 @@ export default async function CreditsPage({ searchParams }: CreditsPageProps) {
             );
           })
         )}
+        {hasMore ? (
+          <Link
+            href={`/creditos?${moreParams.toString()}`}
+            className="mt-1 inline-flex min-h-12 items-center justify-center rounded-md border border-line bg-white px-5 text-sm font-extrabold text-moss shadow-soft transition hover:bg-field"
+          >
+            Mostrar mas creditos
+          </Link>
+        ) : null}
       </section>
     </main>
   );
