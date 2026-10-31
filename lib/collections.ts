@@ -1,3 +1,4 @@
+import { CollectionItemStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { todayInMexicoAsUtcDate } from "@/lib/dates";
 import { syncAutomaticLateFees } from "@/lib/late-fees";
@@ -103,48 +104,68 @@ export async function getOrCreateTodayCollection() {
     },
   });
   const existingByInstallmentId = new Map(existingItems.map((item) => [item.installmentId, item]));
-  const operations = dueInstallments.flatMap((installment) => {
+  const itemsToCreate: Prisma.CollectionItemCreateManyInput[] = [];
+  const itemsToUpdate: Array<{ id: string; expectedAmount: string; status: CollectionItemStatus }> = [];
+
+  for (const installment of dueInstallments) {
     const existing = existingByInstallmentId.get(installment.id);
     const expectedAmount = itemBalance(installment);
-    const expectedStatus = installment.dueDate < today ? "overdue" : "pending";
+    const expectedStatus: CollectionItemStatus = installment.dueDate < today ? "overdue" : "pending";
 
     if (!existing) {
-      return [
-        prisma.collectionItem.create({
-          data: {
-            collectionDayId: collectionDay.id,
-            clientId: installment.credit.clientId,
-            creditId: installment.creditId,
-            installmentId: installment.id,
-            zoneId: installment.credit.zoneId,
-            expectedAmount: expectedAmount.toFixed(2),
-            collectedAmount: "0.00",
-            status: expectedStatus,
-          },
-        }),
-      ];
-    }
+      itemsToCreate.push({
+        collectionDayId: collectionDay.id,
+        clientId: installment.credit.clientId,
+        creditId: installment.creditId,
+        installmentId: installment.id,
+        zoneId: installment.credit.zoneId,
+        expectedAmount: expectedAmount.toFixed(2),
+        collectedAmount: "0.00",
+        status: expectedStatus,
+      });
+    } else {
+      const amountChanged = Math.abs(Number(existing.expectedAmount) - expectedAmount) >= 0.01;
+      const statusChanged =
+        existing.status !== expectedStatus &&
+        existing.status !== "paid" &&
+        existing.status !== "partial";
 
-    const amountChanged = Math.abs(Number(existing.expectedAmount) - expectedAmount) >= 0.01;
-    const statusChanged = existing.status !== expectedStatus && existing.status !== "paid" && existing.status !== "partial";
-
-    if (!amountChanged && !statusChanged) {
-      return [];
-    }
-
-    return [
-      prisma.collectionItem.update({
-        where: { id: existing.id },
-        data: {
+      if (amountChanged || statusChanged) {
+        itemsToUpdate.push({
+          id: existing.id,
           expectedAmount: expectedAmount.toFixed(2),
           status: statusChanged ? expectedStatus : existing.status,
-        },
-      }),
-    ];
-  });
+        });
+      }
+    }
+  }
 
-  if (operations.length > 0) {
-    await prisma.$transaction(operations);
+  if (itemsToCreate.length > 0) {
+    await prisma.collectionItem.createMany({
+      data: itemsToCreate,
+      skipDuplicates: true,
+    });
+  }
+
+  if (itemsToUpdate.length > 0) {
+    const batchSize = 25;
+    for (let i = 0; i < itemsToUpdate.length; i += batchSize) {
+      const batch = itemsToUpdate.slice(i, i + batchSize);
+      await prisma.$transaction(
+        batch.map((item) =>
+          prisma.collectionItem.update({
+            where: { id: item.id },
+            data: {
+              expectedAmount: item.expectedAmount,
+              status: item.status,
+            },
+          }),
+        ),
+      );
+    }
+  }
+
+  if (itemsToCreate.length > 0 || itemsToUpdate.length > 0) {
     await refreshCollectionTotals(collectionDay.id);
   }
 

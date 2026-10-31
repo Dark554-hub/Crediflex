@@ -235,6 +235,10 @@ async function carryForwardMissedInstallments(today: Date) {
   }
 
   if (allOperations.length > 0) {
-    await prisma.$transaction(allOperations);
+    const batchSize = 25;
+    for (let i = 0; i < allOperations.length; i += batchSize) {
+      const batch = allOperations.slice(i, i + batchSize);
+      await prisma.$transaction(batch);
+    }
   }
 }
