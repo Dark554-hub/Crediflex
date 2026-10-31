@@ -82,10 +82,9 @@ export async function getCredits(filters: CreditFilters) {
     include: {
       client: true,
       zone: true,
-      installments: {
+      _count: {
         select: {
-          id: true,
-          status: true,
+          installments: { where: { status: "paid" } },
         },
       },
     },

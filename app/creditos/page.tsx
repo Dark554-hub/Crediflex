@@ -1,5 +1,5 @@
 import { CreditStatus, CreditType } from "@prisma/client";
-import { CircleDollarSign, MapPin, Plus, Search } from "lucide-react";
+import { ChevronRight, CircleDollarSign, MapPin, Plus, Search } from "lucide-react";
 import Link from "next/link";
 import { CreditStatusBadge, creditStatusLabels } from "@/components/credits/credit-status-badge";
 import { ButtonLink } from "@/components/ui/button";
@@ -130,49 +130,60 @@ export default async function CreditsPage({ searchParams }: CreditsPageProps) {
           </div>
         ) : (
           credits.map((credit, index) => {
-            const paidInstallments = credit.installments.filter((item) => item.status === "paid").length;
+            const paidInstallments = credit._count.installments;
 
             return (
-              <Link
+              <div
                 key={credit.id}
-                href={`/creditos/${credit.id}`}
-                className="rounded-md border border-line bg-white p-4 shadow-soft transition duration-200 hover:border-maize active:scale-[0.995] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-maize/25"
+                className="rounded-md border border-line bg-white shadow-soft transition duration-200 hover:border-maize"
               >
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full bg-ink px-2.5 py-1 text-xs font-extrabold text-white">
-                        #{credit.creditNumber ?? index + 1}
-                      </span>
-                      <h2 className="truncate text-lg font-extrabold text-ink">{credit.client.fullName}</h2>
-                      <CreditStatusBadge status={credit.status} />
+                <Link
+                  href={`/creditos/${credit.id}`}
+                  className="block rounded-md p-4 active:scale-[0.995] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-maize/25"
+                >
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full bg-ink px-2.5 py-1 text-xs font-extrabold text-white">
+                          #{credit.creditNumber ?? index + 1}
+                        </span>
+                        <h2 className="truncate text-lg font-extrabold text-ink">{credit.client.fullName}</h2>
+                        <CreditStatusBadge status={credit.status} />
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-stone-700">
+                        <span className="inline-flex items-center gap-1">
+                          <MapPin size={16} aria-hidden />
+                          {credit.zone.name}
+                        </span>
+                        <span>{typeLabels[credit.type]}</span>
+                        {credit.productType === "express" ? (
+                          <span className="rounded-full bg-maize/20 px-2 py-0.5 text-xs font-black text-moss">
+                            Express
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-mint px-2 py-0.5 text-xs font-black text-ink">
+                            Normal
+                          </span>
+                        )}
+                        <span>
+                          {paidInstallments}/{credit.installmentCount} pagos
+                        </span>
+                      </div>
                     </div>
-                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-stone-700">
-                      <span className="inline-flex items-center gap-1">
-                        <MapPin size={16} aria-hidden />
-                        {credit.zone.name}
-                      </span>
-                      <span>{typeLabels[credit.type]}</span>
-                      {credit.productType === "express" ? (
-                        <span className="rounded-full bg-maize/20 px-2 py-0.5 text-xs font-black text-moss">
-                          Express
-                        </span>
-                      ) : (
-                        <span className="rounded-full bg-mint px-2 py-0.5 text-xs font-black text-ink">
-                          Normal
-                        </span>
-                      )}
-                      <span>
-                        {paidInstallments}/{credit.installmentCount} pagos
-                      </span>
+                    <div className="sm:text-right">
+                      <p className="text-sm text-stone-600">Total a pagar</p>
+                      <p className="text-xl font-extrabold text-ink">{formatCurrency(credit.totalAmount)}</p>
                     </div>
                   </div>
-                  <div className="sm:text-right">
-                    <p className="text-sm text-stone-600">Total a pagar</p>
-                    <p className="text-xl font-extrabold text-ink">{formatCurrency(credit.totalAmount)}</p>
-                  </div>
-                </div>
-              </Link>
+                </Link>
+                <Link
+                  href={`/clientes/${credit.clientId}`}
+                  className="flex items-center justify-between gap-2 border-t border-line px-4 py-2 text-sm font-bold text-moss transition hover:bg-field"
+                >
+                  <span>Ver perfil de {credit.client.fullName} (todos sus creditos)</span>
+                  <ChevronRight size={16} aria-hidden />
+                </Link>
+              </div>
             );
           })
         )}

@@ -18,8 +18,9 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
   }
 
   const effectiveness = client.paymentEffectiveness;
-  const activeCredits = client.credits.filter((credit) => credit.status !== "settled");
+  const activeCredits = client.credits.filter((credit) => credit.status !== "settled" && credit.status !== "cancelled");
   const settledCredits = client.credits.filter((credit) => credit.status === "settled");
+  const totalPending = activeCredits.reduce((total, credit) => total + creditPending(credit.installments), 0);
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-5xl px-4 py-5 sm:px-6 lg:px-8">
@@ -96,7 +97,15 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
       </section>
 
       <section className="mt-5 rounded-md border border-line bg-white/75 p-4 sm:p-6">
-        <h2 className="text-xl font-black text-ink">Creditos del cliente</h2>
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <h2 className="text-xl font-black text-ink">Creditos del cliente</h2>
+          {activeCredits.length > 1 ? (
+            <p className="text-sm font-semibold text-stone-600">
+              {activeCredits.length} creditos activos - saldo total{" "}
+              <span className="font-black text-moss">{formatCurrency(totalPending)}</span>
+            </p>
+          ) : null}
+        </div>
         <div className="mt-4 grid gap-3">
           {client.credits.length === 0 ? (
             <div className="rounded-md border border-dashed border-line bg-field px-4 py-8 text-center text-sm text-stone-600">
@@ -125,6 +134,23 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
   );
 }
 
+type ProfileInstallment = {
+  installmentNumber: number;
+  dueDate: Date;
+  scheduledAmount: unknown;
+  lateFeeAmount: unknown;
+  paidAmount: unknown;
+  status: string;
+};
+
+function installmentBalance(item: ProfileInstallment) {
+  return Math.max(Number(item.scheduledAmount) + Number(item.lateFeeAmount) - Number(item.paidAmount), 0);
+}
+
+function creditPending(installments: ProfileInstallment[]) {
+  return installments.reduce((total, item) => total + installmentBalance(item), 0);
+}
+
 function CreditHistoryItem({
   credit,
   muted = false,
@@ -138,6 +164,7 @@ function CreditHistoryItem({
     startDate: Date;
     installmentCount: number;
     totalAmount: number | { toString(): string };
+    installments: ProfileInstallment[];
     paymentEffectiveness?: {
       punctualityRate: number;
       accruedPaymentRate: number;
@@ -148,34 +175,76 @@ function CreditHistoryItem({
   };
   muted?: boolean;
 }) {
+  const isSettled = credit.status === "settled";
+  const paidCount = credit.installments.filter((item) => item.status === "paid").length;
+  const pending = creditPending(credit.installments);
+  const nextInstallment = credit.installments.find((item) => item.status !== "paid" && installmentBalance(item) > 0);
+  const progress = credit.installmentCount > 0 ? Math.round((paidCount / credit.installmentCount) * 100) : 0;
+  const label =
+    credit.productType === "express"
+      ? "Express"
+      : credit.type === "daily"
+        ? "Credito diario"
+        : credit.type === "biweekly"
+          ? "Credito quincenal"
+          : "Credito semanal";
+
   return (
     <div className={muted ? "rounded-md border border-line bg-field/60 p-4 opacity-80" : "rounded-md border border-line bg-field p-4"}>
       <Link href={`/creditos/${credit.id}`} className="block transition hover:text-moss">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="font-bold text-ink">
-              #{credit.creditNumber ?? "-"} - {credit.productType === "express" ? "Express" : credit.type === "daily" ? "Credito diario" : credit.type === "biweekly" ? "Credito quincenal" : "Credito semanal"}
+              #{credit.creditNumber ?? "-"} - {label}
             </p>
             <p className="text-sm text-stone-600">
-              Inicio {formatDate(credit.startDate)} - {credit.installmentCount} pagos
+              Inicio {formatDate(credit.startDate)} - {paidCount}/{credit.installmentCount} pagos
             </p>
-            {credit.status === "settled" && credit.paymentEffectiveness ? (
+            {!isSettled && nextInstallment ? (
+              <p className="mt-1 text-xs font-semibold text-stone-600">
+                Proximo pago #{nextInstallment.installmentNumber}: {formatDate(nextInstallment.dueDate)} -{" "}
+                {formatCurrency(installmentBalance(nextInstallment))}
+              </p>
+            ) : null}
+            {isSettled && credit.paymentEffectiveness ? (
               <p className="mt-1 text-xs font-semibold text-stone-600">
                 Puntualidad {Math.round(credit.paymentEffectiveness.punctualityRate * 100)}% - Devengado {Math.round(credit.paymentEffectiveness.accruedPaymentRate * 100)}%
               </p>
             ) : null}
           </div>
-          <p className="text-lg font-black text-ink">{formatCurrency(credit.totalAmount)}</p>
+          <div className="sm:text-right">
+            {isSettled ? (
+              <p className="text-lg font-black text-ink">{formatCurrency(credit.totalAmount)}</p>
+            ) : (
+              <>
+                <p className="text-xs font-semibold text-stone-500">Saldo pendiente</p>
+                <p className="text-lg font-black text-moss">{formatCurrency(pending)}</p>
+                <p className="text-xs text-stone-500">Total {formatCurrency(credit.totalAmount)}</p>
+              </>
+            )}
+          </div>
         </div>
+        {!isSettled ? (
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
+            <div className="h-full rounded-full bg-maize" style={{ width: `${Math.min(progress, 100)}%` }} />
+          </div>
+        ) : null}
       </Link>
-      {credit.status === "settled" ? (
+      {isSettled ? (
         <Link
           href={`/creditos/nuevo?renovar=${credit.id}`}
           className="mt-3 inline-flex min-h-10 items-center justify-center rounded-md bg-moss px-3 text-sm font-bold text-white"
         >
           Renovar
         </Link>
-      ) : null}
+      ) : (
+        <Link
+          href={`/creditos/${credit.id}/pagos/nuevo`}
+          className="mt-3 inline-flex min-h-10 items-center justify-center rounded-md bg-ink px-4 text-sm font-bold text-white"
+        >
+          Cobrar este credito
+        </Link>
+      )}
     </div>
   );
 }

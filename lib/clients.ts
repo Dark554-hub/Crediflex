@@ -57,6 +57,8 @@ export async function getClients(filters: ClientFilters) {
 }
 
 export async function getClientById(id: string) {
+  // Consulta liviana: solo los campos que usa el perfil (antes traia todas las columnas
+  // de cuotas, pagos y asignaciones, lo que hacia lenta la carga con muchos creditos).
   const client = await prisma.client.findFirst({
     where: {
       id,
@@ -70,10 +72,19 @@ export async function getClientById(id: string) {
         },
         include: {
           installments: {
-            include: {
+            select: {
+              id: true,
+              installmentNumber: true,
+              dueDate: true,
+              scheduledAmount: true,
+              lateFeeAmount: true,
+              paidAmount: true,
+              status: true,
               allocations: {
-                include: {
-                  payment: true,
+                select: {
+                  amountApplied: true,
+                  lateFeeApplied: true,
+                  payment: { select: { paymentDate: true } },
                 },
                 orderBy: {
                   createdAt: "asc",
