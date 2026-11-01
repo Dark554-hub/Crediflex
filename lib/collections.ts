@@ -44,6 +44,11 @@ export async function getOrCreateTodayCollection() {
         collectionDate: today,
       },
     });
+  } else if (collectionDay.closedAt) {
+    collectionDay = await prisma.collectionDay.update({
+      where: { id: collectionDay.id },
+      data: { closedAt: null },
+    });
   }
 
   const buildState = globalForCollections.collectionBuild;

@@ -1,6 +1,5 @@
 import { CalendarDays, ChevronRight, CircleDollarSign, Search } from "lucide-react";
 import Link from "next/link";
-import { closeCollectionDayAction, reopenCollectionDayAction } from "@/app/cobros/actions";
 import { AppBar } from "@/components/mobile/app-bar";
 import { formatDate } from "@/lib/format";
 import { getOrCreateTodayCollection } from "@/lib/collections";
@@ -92,11 +91,7 @@ export default async function DailyCollectionsPage({
               <p className="text-sm font-semibold text-white/70">Jornada</p>
               <h1 className="text-2xl font-extrabold">{formatDate(collectionDay.collectionDate)}</h1>
             </div>
-            {collectionDay.closedAt ? (
-              <span className="rounded-full bg-white/15 px-3 py-1 text-xs font-bold">Cerrada</span>
-            ) : (
-              <span className="rounded-full bg-maize px-3 py-1 text-xs font-bold text-ink">Abierta</span>
-            )}
+            <span className="rounded-full bg-maize px-3 py-1 text-xs font-bold text-ink">Activa</span>
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-3">
@@ -106,22 +101,6 @@ export default async function DailyCollectionsPage({
             <SummaryItem label="Mora" value={formatCurrency(totalLateFee)} />
           </div>
         </div>
-
-        {!collectionDay.closedAt ? (
-          <form action={closeCollectionDayAction} className="mt-3">
-            <input type="hidden" name="collectionDayId" value={collectionDay.id} />
-            <button className="min-h-12 w-full rounded-md bg-moss px-4 text-sm font-extrabold text-white shadow-soft transition active:bg-ink focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-maize/30">
-              Cerrar jornada
-            </button>
-          </form>
-        ) : (
-          <form action={reopenCollectionDayAction} className="mt-3">
-            <input type="hidden" name="collectionDayId" value={collectionDay.id} />
-            <button className="min-h-12 w-full rounded-md border border-line bg-white/10 px-4 text-sm font-extrabold text-white transition hover:bg-white/20 active:scale-98">
-              Reabrir jornada (deshacer cierre)
-            </button>
-          </form>
-        )}
       </section>
 
       <section className="mx-auto max-w-4xl px-4 pb-2">

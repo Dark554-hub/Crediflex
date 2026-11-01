@@ -1,4 +1,4 @@
-import { CheckCircle2, CircleDollarSign, Undo2, XCircle } from "lucide-react";
+import { CircleDollarSign, Undo2, XCircle } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { markCollectionItemMissedAction, unmarkCollectionItemMissedAction } from "@/app/cobros/actions";
@@ -120,47 +120,40 @@ export default async function ClientCollectionsPage({ params }: { params: { clie
                 </div>
               </div>
 
-              {!collectionDay.closedAt ? (
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <Link
-                    href={`/creditos/${group.creditId}/pagos/nuevo`}
-                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-moss px-3 text-sm font-black text-white"
-                  >
-                    <CircleDollarSign size={17} aria-hidden />
-                    Cobrar este
-                  </Link>
-                  {group.items.some((item) => item.status === "missed") ? (
-                    <form action={unmarkCollectionItemMissedAction}>
-                      {group.items.map((item) => (
-                        <input key={item.id} type="hidden" name="itemId" value={item.id} />
-                      ))}
-                      <input type="hidden" name="collectionDayId" value={collectionDay.id} />
-                      <input type="hidden" name="clientId" value={params.clientId} />
-                      <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-moss/30 bg-mint px-3 text-sm font-black text-moss">
-                        <Undo2 size={17} aria-hidden />
-                        Cancelar no pago
-                      </button>
-                    </form>
-                  ) : (
-                    <form action={markCollectionItemMissedAction}>
-                      {group.items.map((item) => (
-                        <input key={item.id} type="hidden" name="itemId" value={item.id} />
-                      ))}
-                      <input type="hidden" name="collectionDayId" value={collectionDay.id} />
-                      <input type="hidden" name="clientId" value={params.clientId} />
-                      <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-clay/30 bg-clay/10 px-3 text-sm font-black text-clay">
-                        <XCircle size={17} aria-hidden />
-                        No pago
-                      </button>
-                    </form>
-                  )}
-                </div>
-              ) : (
-                <div className="mt-3 inline-flex items-center gap-2 text-sm font-bold text-moss">
-                  <CheckCircle2 size={17} aria-hidden />
-                  Jornada cerrada
-                </div>
-              )}
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <Link
+                  href={`/creditos/${group.creditId}/pagos/nuevo`}
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-moss px-3 text-sm font-black text-white"
+                >
+                  <CircleDollarSign size={17} aria-hidden />
+                  Cobrar este
+                </Link>
+                {group.items.some((item) => item.status === "missed") ? (
+                  <form action={unmarkCollectionItemMissedAction}>
+                    {group.items.map((item) => (
+                      <input key={item.id} type="hidden" name="itemId" value={item.id} />
+                    ))}
+                    <input type="hidden" name="collectionDayId" value={collectionDay.id} />
+                    <input type="hidden" name="clientId" value={params.clientId} />
+                    <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-moss/30 bg-mint px-3 text-sm font-black text-moss">
+                      <Undo2 size={17} aria-hidden />
+                      Cancelar no pago
+                    </button>
+                  </form>
+                ) : (
+                  <form action={markCollectionItemMissedAction}>
+                    {group.items.map((item) => (
+                      <input key={item.id} type="hidden" name="itemId" value={item.id} />
+                    ))}
+                    <input type="hidden" name="collectionDayId" value={collectionDay.id} />
+                    <input type="hidden" name="clientId" value={params.clientId} />
+                    <button className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-clay/30 bg-clay/10 px-3 text-sm font-black text-clay">
+                      <XCircle size={17} aria-hidden />
+                      No pago
+                    </button>
+                  </form>
+                )}
+              </div>
             </article>
           );
         })}
