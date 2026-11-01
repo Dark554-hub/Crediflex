@@ -78,8 +78,21 @@ export type DashboardData = {
   settledCount: number;
   paymentCountToday: number;
   dueTodayCount: number;
+  dueTodayClientsCount: number;
+  routeClientsCount: number;
   overdueCount: number;
   zoneCollections: Array<{ zoneId: string; name: string; collected: number; expected: number }>;
+  paymentsTodayList: Array<{
+    id: string;
+    amount: number;
+    paymentDate: Date;
+    method: string;
+    creditId: string;
+    creditNumber: number | null;
+    clientId: string;
+    clientName: string;
+    zoneName: string;
+  }>;
   installmentsToday: any[];
   overdueInstallments: any[];
   upcomingInstallments: any[];
@@ -90,7 +103,7 @@ let cachedDashboard: {
   timestamp: number;
 } | null = null;
 
-const DASHBOARD_CACHE_TTL_MS = 15000;
+const DASHBOARD_CACHE_TTL_MS = 5000;
 
 export function invalidateDashboardCache() {
   cachedDashboard = null;
@@ -124,10 +137,22 @@ export async function getDashboardData(): Promise<DashboardData> {
     }),
     prisma.payment.findMany({
       where: { paymentDate: today, cancelledAt: null },
-      select: { amount: true, credit: { select: { zoneId: true } } },
+      include: {
+        client: true,
+        credit: {
+          include: {
+            zone: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
     }),
     prisma.creditInstallment.findMany({
-      where: { dueDate: today, status: { in: ["pending", "partial", "overdue"] } },
+      where: {
+        dueDate: today,
+        status: { in: ["pending", "partial", "overdue"] },
+        credit: { status: { in: ["active", "delinquent"] } },
+      },
       include: { credit: { include: { client: true, zone: true } } },
       orderBy: [{ dueDate: "asc" }, { installmentNumber: "asc" }],
     }),
@@ -135,6 +160,7 @@ export async function getDashboardData(): Promise<DashboardData> {
       where: {
         dueDate: { lt: today },
         status: { in: ["pending", "partial", "overdue"] },
+        credit: { status: { in: ["active", "delinquent"] } },
       },
       include: { credit: { include: { client: true, zone: true } } },
       orderBy: [{ dueDate: "asc" }, { installmentNumber: "asc" }],
@@ -154,10 +180,11 @@ export async function getDashboardData(): Promise<DashboardData> {
       where: {
         dueDate: { gte: tomorrow, lte: nextWeek },
         status: { in: ["pending", "partial", "overdue"] },
+        credit: { status: { in: ["active", "delinquent"] } },
       },
       include: { credit: { include: { client: true, zone: true } } },
       orderBy: [{ dueDate: "asc" }, { installmentNumber: "asc" }],
-      take: 6,
+      take: 15,
     }),
     prisma.credit.groupBy({ by: ["status"], _count: { _all: true } }),
     prisma.payment.count({ where: { paymentDate: today, cancelledAt: null } }),
@@ -168,9 +195,12 @@ export async function getDashboardData(): Promise<DashboardData> {
   const pendingToday = installmentsToday.reduce((total, installment) => total + installmentBalance(installment), 0);
   const overdueAmount = overdueInstallments.reduce((total, installment) => total + installmentBalance(installment), 0);
   const delinquentClients = new Set(overdueInstallments.map((installment) => installment.credit.clientId)).size;
+  const dueTodayClientsCount = new Set(installmentsToday.map((installment) => installment.credit.clientId)).size;
+  const routeClientsCount = new Set([
+    ...installmentsToday.map((installment) => installment.credit.clientId),
+    ...overdueInstallments.map((installment) => installment.credit.clientId),
+  ]).size;
 
-  // Interes cobrado estimado = pago ordinario de cada cuota * proporcion de interes de esa cuota.
-  // Esto permite reportar ganancias aun con pagos parciales sin inventar saldos hardcodeados.
   const interestCollected = allInstallments.reduce((total, installment) => {
     const scheduled = Number(installment.scheduledAmount);
     if (scheduled <= 0) return total;
@@ -186,12 +216,27 @@ export async function getDashboardData(): Promise<DashboardData> {
     collected: paymentsToday
       .filter((payment) => payment.credit.zoneId === zone.id)
       .reduce((total, payment) => total + Number(payment.amount), 0),
-    expected: installmentsToday
+    expected: [...installmentsToday, ...overdueInstallments]
       .filter((installment) => installment.credit.zoneId === zone.id)
       .reduce((total, installment) => total + installmentBalance(installment), 0),
   }));
 
-  const result = {
+  const paymentsTodayList = paymentsToday.map((payment) => ({
+    id: payment.id,
+    amount: Number(payment.amount),
+    paymentDate: payment.paymentDate,
+    method: payment.method,
+    creditId: payment.creditId,
+    creditNumber: payment.credit.creditNumber,
+    clientId: payment.clientId,
+    clientName: payment.client.fullName,
+    zoneName: payment.credit.zone.name,
+  }));
+
+  const activeOnlyCount = creditCounts.find((item) => item.status === "active")?._count._all ?? 0;
+  const delinquentOnlyCount = creditCounts.find((item) => item.status === "delinquent")?._count._all ?? 0;
+
+  const result: DashboardData = {
     today,
     activePrincipal,
     collectedToday,
@@ -200,14 +245,17 @@ export async function getDashboardData(): Promise<DashboardData> {
     delinquentClients,
     interestCollected,
     portfolioBalance,
-    activeCount: creditCounts.find((item) => item.status === "active")?._count._all ?? 0,
+    activeCount: activeOnlyCount + delinquentOnlyCount,
     settledCount: creditCounts.find((item) => item.status === "settled")?._count._all ?? 0,
     paymentCountToday,
     dueTodayCount: installmentsToday.length,
+    dueTodayClientsCount,
+    routeClientsCount,
     overdueCount: overdueInstallments.length,
     zoneCollections,
-    installmentsToday: installmentsToday.slice(0, 5),
-    overdueInstallments: overdueInstallments.slice(0, 5),
+    paymentsTodayList,
+    installmentsToday,
+    overdueInstallments,
     upcomingInstallments,
   };
 
@@ -253,6 +301,11 @@ export async function getOverdueInstallments() {
       },
       status: {
         in: ["pending", "partial", "overdue"],
+      },
+      credit: {
+        status: {
+          in: ["active", "delinquent"],
+        },
       },
     },
     include: {

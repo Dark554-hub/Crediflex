@@ -1,4 +1,4 @@
-import { CircleDollarSign, Undo2, XCircle } from "lucide-react";
+import { CircleDollarSign, Eye, Undo2, XCircle } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { markCollectionItemMissedAction, unmarkCollectionItemMissedAction } from "@/app/cobros/actions";
@@ -100,7 +100,7 @@ export default async function ClientCollectionsPage({ params }: { params: { clie
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="text-lg font-black text-ink">
-                      {isExpress ? "Express" : "Credito normal"}
+                      {isExpress ? "Express" : "Credito normal"} #{group.credit.creditNumber ?? "-"}
                     </h2>
                     <CreditStatusBadge status={group.credit.status} />
                   </div>
@@ -153,6 +153,13 @@ export default async function ClientCollectionsPage({ params }: { params: { clie
                     </button>
                   </form>
                 )}
+                <Link
+                  href={`/creditos/${group.creditId}`}
+                  className="col-span-2 inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-line bg-field px-3 text-sm font-black text-ink transition hover:border-moss"
+                >
+                  <Eye size={17} aria-hidden />
+                  Ver detalles del prestamo
+                </Link>
               </div>
             </article>
           );

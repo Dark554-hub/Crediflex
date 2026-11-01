@@ -231,21 +231,29 @@ function CreditHistoryItem({
           </div>
         ) : null}
       </Link>
-      {isSettled ? (
+      <div className="mt-3 flex flex-wrap gap-2">
+        {isSettled ? (
+          <Link
+            href={`/creditos/nuevo?renovar=${credit.id}`}
+            className="inline-flex min-h-10 items-center justify-center rounded-md bg-moss px-3.5 text-sm font-bold text-white"
+          >
+            Renovar
+          </Link>
+        ) : (
+          <Link
+            href={`/creditos/${credit.id}/pagos/nuevo`}
+            className="inline-flex min-h-10 items-center justify-center rounded-md bg-ink px-4 text-sm font-bold text-white"
+          >
+            Cobrar este credito
+          </Link>
+        )}
         <Link
-          href={`/creditos/nuevo?renovar=${credit.id}`}
-          className="mt-3 inline-flex min-h-10 items-center justify-center rounded-md bg-moss px-3 text-sm font-bold text-white"
+          href={`/creditos/${credit.id}`}
+          className="inline-flex min-h-10 items-center justify-center rounded-md border border-line bg-white px-3.5 text-sm font-bold text-ink transition hover:border-moss"
         >
-          Renovar
+          Ver detalles del prestamo
         </Link>
-      ) : (
-        <Link
-          href={`/creditos/${credit.id}/pagos/nuevo`}
-          className="mt-3 inline-flex min-h-10 items-center justify-center rounded-md bg-ink px-4 text-sm font-bold text-white"
-        >
-          Cobrar este credito
-        </Link>
-      )}
+      </div>
     </div>
   );
 }

@@ -2,8 +2,10 @@ import {
   ArrowRight,
   BarChart3,
   CalendarDays,
+  CheckCircle2,
   ClockAlert,
   Cloud,
+  Eye,
   FileSpreadsheet,
   HandCoins,
   History,
@@ -16,7 +18,6 @@ import {
   UserPlus,
   Users,
   WalletCards,
-  Wifi,
   WifiOff,
 } from "lucide-react";
 import Link from "next/link";
@@ -27,8 +28,8 @@ import { getDashboardData } from "@/lib/dashboard";
 import { formatCurrency } from "@/lib/money";
 
 const routeActions = [
-  { href: "/cobros", label: "Cobrar hoy", helper: "Clientes con pago pendiente", icon: CalendarDays, stat: "dueTodayCount" },
-  { href: "/atrasadas", label: "Atrasados", helper: "Cuotas que requieren seguimiento", icon: ClockAlert, stat: "overdueCount" },
+  { href: "/cobros", label: "Cobrar hoy", helper: "Clientes en ruta hoy y vencidos", icon: CalendarDays, stat: "routeClientsCount" },
+  { href: "/atrasadas", label: "Atrasados", helper: "Clientes con cuotas vencidas", icon: ClockAlert, stat: "delinquentClients" },
   { href: "/creditos/nuevo", label: "Nuevo prestamo", helper: "Normal o express", icon: HandCoins },
   { href: "/clientes/nuevo", label: "Nuevo cliente", helper: "Alta rapida para ruta", icon: UserPlus },
 ] as const;
@@ -71,32 +72,36 @@ export default async function HomePage() {
 
   const statCards = [
     {
+      href: "#cobrado-hoy",
       label: "Cobrado hoy",
       value: formatCurrency(dashboard.collectedToday),
-      sublabel: `${dashboard.paymentCountToday} pagos registrados`,
+      sublabel: `${dashboard.paymentCountToday} pago${dashboard.paymentCountToday === 1 ? "" : "s"} registrado${dashboard.paymentCountToday === 1 ? "" : "s"} · Ver lista`,
       color: "text-moss",
-      bg: "bg-mint/40",
+      bg: "bg-mint/40 hover:border-moss",
     },
     {
+      href: "#por-cobrar-hoy",
       label: "Por cobrar hoy",
       value: formatCurrency(dashboard.pendingToday),
-      sublabel: `${dashboard.dueTodayCount} cuotas pendientes`,
+      sublabel: `${dashboard.dueTodayClientsCount} cliente${dashboard.dueTodayClientsCount === 1 ? "" : "s"} (${dashboard.dueTodayCount} cuotas) · Ver lista`,
       color: "text-ink",
-      bg: "bg-field",
+      bg: "bg-field hover:border-maize",
     },
     {
+      href: "#atrasados-lista",
       label: "Atrasado",
       value: formatCurrency(dashboard.overdueAmount),
-      sublabel: `${dashboard.delinquentClients} clientes`,
+      sublabel: `${dashboard.delinquentClients} cliente${dashboard.delinquentClients === 1 ? "" : "s"} (${dashboard.overdueCount} cuotas) · Ver lista`,
       color: dashboard.overdueAmount > 0 ? "text-red-700" : "text-moss",
-      bg: dashboard.overdueAmount > 0 ? "bg-red-50" : "bg-field",
+      bg: dashboard.overdueAmount > 0 ? "bg-red-50 hover:border-red-300" : "bg-field hover:border-maize",
     },
     {
+      href: "/creditos",
       label: "Capital activo",
       value: formatCurrency(dashboard.activePrincipal),
-      sublabel: `${dashboard.activeCount} prestamos activos`,
+      sublabel: `${dashboard.activeCount} prestamos activos · Ver todos`,
       color: "text-ink",
-      bg: "bg-field",
+      bg: "bg-field hover:border-maize",
     },
   ];
 
@@ -140,7 +145,7 @@ export default async function HomePage() {
               href="/cobros"
               className="inline-flex shrink-0 min-h-12 items-center justify-center gap-2 rounded-lg bg-maize px-5 py-3 text-sm font-extrabold text-ink transition hover:bg-mint active:scale-[0.98] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-maize/35"
             >
-              Ir a cobros
+              Ir a cobros ({dashboard.routeClientsCount})
               <ArrowRight size={18} aria-hidden />
             </Link>
           </div>
@@ -153,19 +158,23 @@ export default async function HomePage() {
 
         {/* Stat cards */}
         <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {statCards.map(({ label, value, sublabel, color, bg }) => (
-            <div key={label} className={`rounded-xl border border-line ${bg} p-4 shadow-soft`}>
+          {statCards.map(({ href, label, value, sublabel, color, bg }) => (
+            <a
+              key={label}
+              href={href}
+              className={`block rounded-xl border border-line ${bg} p-4 shadow-soft transition active:scale-[0.99]`}
+            >
               <p className="text-xs font-bold text-stone-500 uppercase tracking-wide leading-none">{label}</p>
               <p className={`mt-2 text-xl font-extrabold leading-none ${color}`}>{value}</p>
               <p className="mt-2 text-xs font-semibold text-stone-600 leading-snug">{sublabel}</p>
-            </div>
+            </a>
           ))}
         </div>
 
         {/* Main grid: actions + lists */}
-        <div className="grid gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(300px,0.9fr)]">
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(320px,1fr)]">
           {/* Left column */}
-          <div className="grid gap-5">
+          <div className="grid content-start gap-5">
             {/* Quick actions */}
             <div className="rounded-xl border border-line bg-white p-5 shadow-soft">
               <div className="flex items-center justify-between gap-3 mb-4">
@@ -194,7 +203,7 @@ export default async function HomePage() {
                         <span className="mt-0.5 block text-xs font-semibold leading-snug text-stone-500">{item.helper}</span>
                       </span>
                       {value !== null && value > 0 ? (
-                        <span className="shrink-0 rounded-full bg-ink px-2 py-0.5 text-xs font-extrabold text-white">{value}</span>
+                        <span className="shrink-0 rounded-full bg-ink px-2.5 py-0.5 text-xs font-extrabold text-white">{value}</span>
                       ) : null}
                     </Link>
                   );
@@ -234,25 +243,6 @@ export default async function HomePage() {
                 })}
               </div>
             </div>
-          </div>
-
-          {/* Right column: lists */}
-          <div className="grid content-start gap-5">
-            <DashboardList
-              title="Pendientes de hoy"
-              emptyText="No hay cobros pendientes para hoy."
-              items={todayClientItems}
-            />
-            <DashboardList
-              title="Atrasados"
-              emptyText="No hay cuotas vencidas."
-              items={overdueClientItems}
-            />
-            <DashboardList
-              title="Proximos 7 dias"
-              emptyText="No hay pagos proximos."
-              items={upcomingClientItems}
-            />
 
             {/* Zone collections */}
             {dashboard.zoneCollections.length > 0 && (
@@ -274,7 +264,7 @@ export default async function HomePage() {
                           />
                         </div>
                         <div className="flex justify-between mt-1.5 text-xs font-semibold text-stone-500">
-                          <span>Esperado: {formatCurrency(zone.expected)}</span>
+                          <span>Por cobrar: {formatCurrency(zone.expected)}</span>
                           <span>{pct}%</span>
                         </div>
                       </div>
@@ -283,6 +273,90 @@ export default async function HomePage() {
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Right column: lists */}
+          <div className="grid content-start gap-5">
+            {/* Cobrado hoy list */}
+            <div id="cobrado-hoy" className="rounded-xl border border-line bg-white p-5 shadow-soft">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 size={18} className="text-moss" aria-hidden />
+                  <h2 className="text-base font-extrabold text-ink">Cobrado hoy (Pagos registrados)</h2>
+                </div>
+                {dashboard.paymentsTodayList.length > 0 ? (
+                  <span className="rounded-full bg-mint px-2.5 py-0.5 text-xs font-extrabold text-moss">
+                    {dashboard.paymentsTodayList.length}
+                  </span>
+                ) : null}
+              </div>
+              <div className="grid max-h-96 gap-2.5 overflow-y-auto pr-1">
+                {dashboard.paymentsTodayList.length === 0 ? (
+                  <p className="rounded-lg bg-field px-3 py-4 text-center text-xs font-semibold text-stone-500">
+                    Aun no hay pagos registrados hoy.
+                  </p>
+                ) : (
+                  dashboard.paymentsTodayList.map((payment) => (
+                    <div
+                      key={payment.id}
+                      className="rounded-lg border border-line/70 bg-field p-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-extrabold text-ink">{payment.clientName}</p>
+                          <p className="mt-0.5 text-xs font-semibold text-stone-500">
+                            {payment.zoneName} · Prestamo #{payment.creditNumber ?? "-"}
+                          </p>
+                        </div>
+                        <p className="shrink-0 text-sm font-extrabold text-moss">
+                          {formatCurrency(payment.amount)}
+                        </p>
+                      </div>
+                      <div className="mt-2.5 flex flex-wrap gap-2">
+                        <Link
+                          href={`/creditos/${payment.creditId}?pago=${payment.id}`}
+                          className="inline-flex min-h-8 items-center gap-1.5 rounded-md bg-moss px-2.5 py-1 text-xs font-bold text-white transition hover:bg-ink"
+                        >
+                          <ReceiptText size={13} aria-hidden />
+                          Ver recibo
+                        </Link>
+                        <Link
+                          href={`/creditos/${payment.creditId}`}
+                          className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-line bg-white px-2.5 py-1 text-xs font-bold text-ink transition hover:border-moss"
+                        >
+                          <Eye size={13} aria-hidden />
+                          Detalles del prestamo
+                        </Link>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div id="por-cobrar-hoy">
+              <DashboardList
+                title="Por cobrar hoy (Quienes faltan hoy)"
+                emptyText="No hay cobros pendientes para hoy."
+                items={todayClientItems}
+                viewAllHref="/cobros"
+              />
+            </div>
+
+            <div id="atrasados-lista">
+              <DashboardList
+                title="Atrasados (Cuotas vencidas)"
+                emptyText="No hay cuotas vencidas."
+                items={overdueClientItems}
+                viewAllHref="/atrasadas"
+              />
+            </div>
+
+            <DashboardList
+              title="Proximos 7 dias"
+              emptyText="No hay pagos proximos."
+              items={upcomingClientItems}
+            />
           </div>
         </div>
       </div>
@@ -349,10 +423,18 @@ function ErrorState({ message }: { message: string }) {
 
 type DashboardInstallment = Awaited<ReturnType<typeof getDashboardData>>["installmentsToday"][number];
 
+type ClientInstallmentGroup = {
+  clientId: string;
+  creditId: string;
+  title: string;
+  zone: string;
+  count: number;
+  balance: number;
+  firstDueDate: Date;
+};
+
 function groupInstallmentsByClient(installments: DashboardInstallment[]) {
-  const groups = installments.reduce<
-    Array<{ clientId: string; title: string; zone: string; count: number; balance: number; firstDueDate: Date }>
-  >((result, installment) => {
+  const groups = installments.reduce<ClientInstallmentGroup[]>((result, installment) => {
     const balance =
       Number(installment.scheduledAmount) +
       Number(installment.lateFeeAmount) -
@@ -370,6 +452,7 @@ function groupInstallmentsByClient(installments: DashboardInstallment[]) {
 
     result.push({
       clientId: installment.credit.clientId,
+      creditId: installment.creditId,
       title: installment.credit.client.fullName,
       zone: installment.credit.zone.name,
       count: 1,
@@ -381,7 +464,9 @@ function groupInstallmentsByClient(installments: DashboardInstallment[]) {
   }, []);
 
   return groups.map((group) => ({
-    href: `/cobros/${group.clientId}`,
+    clientId: group.clientId,
+    collectHref: `/cobros/${group.clientId}`,
+    creditHref: `/creditos/${group.creditId}`,
     title: group.title,
     meta: `${group.zone} · ${group.count} cuota${group.count === 1 ? "" : "s"} · ${formatDate(group.firstDueDate)}`,
     amount: formatCurrency(group.balance),
@@ -392,35 +477,67 @@ function DashboardList({
   title,
   emptyText,
   items,
+  viewAllHref,
 }: {
   title: string;
   emptyText: string;
-  items: Array<{ href: string; title: string; meta: string; amount: string }>;
+  items: Array<{
+    clientId: string;
+    collectHref: string;
+    creditHref: string;
+    title: string;
+    meta: string;
+    amount: string;
+  }>;
+  viewAllHref?: string;
 }) {
   return (
     <div className="rounded-xl border border-line bg-white p-5 shadow-soft">
       <div className="flex items-center justify-between gap-3 mb-3">
         <h2 className="text-base font-extrabold text-ink">{title}</h2>
-        {items.length > 0 ? (
-          <span className="rounded-full bg-mint px-2.5 py-0.5 text-xs font-extrabold text-moss">{items.length}</span>
-        ) : null}
+        <div className="flex items-center gap-2">
+          {items.length > 0 ? (
+            <span className="rounded-full bg-mint px-2.5 py-0.5 text-xs font-extrabold text-moss">{items.length}</span>
+          ) : null}
+          {viewAllHref ? (
+            <Link href={viewAllHref} className="text-xs font-bold text-moss hover:underline">
+              Ver todos
+            </Link>
+          ) : null}
+        </div>
       </div>
-      <div className="grid gap-2">
+      <div className="grid max-h-96 gap-2.5 overflow-y-auto pr-1">
         {items.length === 0 ? (
           <p className="rounded-lg bg-field px-3 py-4 text-center text-xs font-semibold text-stone-500">{emptyText}</p>
         ) : (
           items.map((item) => (
-            <Link
-              key={`${item.href}-${item.meta}`}
-              href={item.href}
-              className="flex items-center gap-3 rounded-lg bg-field p-3 transition duration-150 hover:bg-mint/40 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-maize/25"
+            <div
+              key={`${item.clientId}-${item.meta}`}
+              className="rounded-lg border border-line/70 bg-field p-3"
             >
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-extrabold text-ink leading-snug">{item.title}</p>
-                <p className="mt-0.5 text-xs font-semibold text-stone-500 leading-snug truncate">{item.meta}</p>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-extrabold text-ink leading-snug">{item.title}</p>
+                  <p className="mt-0.5 text-xs font-semibold text-stone-500 leading-snug truncate">{item.meta}</p>
+                </div>
+                <p className="shrink-0 text-sm font-extrabold text-moss">{item.amount}</p>
               </div>
-              <p className="shrink-0 text-sm font-extrabold text-moss">{item.amount}</p>
-            </Link>
+              <div className="mt-2.5 flex flex-wrap gap-2">
+                <Link
+                  href={item.collectHref}
+                  className="inline-flex min-h-8 items-center gap-1.5 rounded-md bg-moss px-2.5 py-1 text-xs font-bold text-white transition hover:bg-ink"
+                >
+                  Cobrar
+                </Link>
+                <Link
+                  href={item.creditHref}
+                  className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-line bg-white px-2.5 py-1 text-xs font-bold text-ink transition hover:border-moss"
+                >
+                  <Eye size={13} aria-hidden />
+                  Detalles del prestamo
+                </Link>
+              </div>
+            </div>
           ))
         )}
       </div>
