@@ -1,4 +1,4 @@
-import { CalendarDays, CircleDollarSign, Download, Handshake, ListChecks, MapPin, Plus } from "lucide-react";
+import { CircleDollarSign, Handshake, ListChecks, Plus } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createAgreementAction } from "@/app/creditos/[id]/convenios/actions";
@@ -8,6 +8,7 @@ import { InstallmentStatusBadge } from "@/components/credits/installment-status-
 import { SettlementCalculator } from "@/components/credits/settlement-calculator";
 import { AppBar } from "@/components/mobile/app-bar";
 import { AvatarHero } from "@/components/mobile/avatar-hero";
+import { PaymentReceiptActions, PaymentTicketData } from "@/components/payments/payment-receipt-modal";
 import { ButtonLink } from "@/components/ui/button";
 import { formatDate } from "@/lib/format";
 import { formatCurrency } from "@/lib/money";
@@ -28,9 +29,24 @@ const agreementStatusLabels = {
   cancelled: "Cancelado",
 };
 
+function formatShortDate(date: Date | string) {
+  return new Intl.DateTimeFormat("es-MX", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(date));
+}
+
 export const dynamic = "force-dynamic";
 
-export default async function CreditDetailPage({ params }: { params: { id: string } }) {
+export default async function CreditDetailPage({
+  params,
+  searchParams,
+}: {
+  params: { id: string };
+  searchParams?: { pago?: string };
+}) {
   const credit = await getCreditById(params.id);
 
   if (!credit) {
@@ -208,6 +224,43 @@ export default async function CreditDetailPage({ params }: { params: { id: strin
                 (total, allocation) => total + Number(allocation.lateFeeApplied),
                 0,
               );
+              const ordinaryTotal = payment.allocations.reduce(
+                (total, allocation) => total + Number(allocation.amountApplied),
+                0,
+              );
+              const paymentsUpToThis = credit.payments.filter(
+                (item) => new Date(item.createdAt).getTime() <= new Date(payment.createdAt).getTime(),
+              );
+              const cumulativeOrdinaryPaid = paymentsUpToThis.reduce(
+                (sum, p) =>
+                  sum + p.allocations.reduce((allocSum, alloc) => allocSum + Number(alloc.amountApplied), 0),
+                0,
+              );
+              const totalAmount = Number(credit.totalAmount);
+              const pendingBalanceAfterPayment = Math.max(totalAmount - cumulativeOrdinaryPaid, 0);
+              const installmentAmount = Number(credit.installmentAmount) || 1;
+              const totalInstallments = Number(credit.installmentCount);
+              const paidInstallmentsCount = Math.min(cumulativeOrdinaryPaid / installmentAmount, totalInstallments);
+              const abonadasInstallmentsCount = ordinaryTotal / installmentAmount;
+
+              const ticketData: PaymentTicketData = {
+                paymentId: payment.id,
+                creditId: credit.id,
+                companyName: "Crediflex",
+                clientName: credit.client.fullName,
+                cedula: credit.client.identification || credit.client.clientNumber || "-",
+                address: credit.client.address,
+                zoneName: credit.zone.name,
+                paymentDate: formatShortDate(payment.paymentDate),
+                abonado: formatCurrency(ordinaryTotal),
+                mora: formatCurrency(lateFeeTotal),
+                total: formatCurrency(payment.amount),
+                saldo: formatCurrency(pendingBalanceAfterPayment),
+                cuotasPagadas: `${paidInstallmentsCount.toFixed(1)} de ${totalInstallments.toFixed(1)}`,
+                cuotasAbonadas: abonadasInstallmentsCount.toFixed(1),
+                diaPrestado: formatShortDate(credit.startDate),
+                reciboGenerado: formatShortDate(payment.paymentDate),
+              };
 
               return (
                 <div key={payment.id} className="rounded-md border border-line bg-field p-4">
@@ -221,15 +274,10 @@ export default async function CreditDetailPage({ params }: { params: { id: strin
                         Mora: {lateFeeTotal > 0 ? formatCurrency(lateFeeTotal) : "No aplicada"}
                       </p>
                     </div>
-                    <ButtonLink
-                      href={`/creditos/${credit.id}/pagos/${payment.id}/comprobante`}
-                      variant="secondary"
-                      className="w-full sm:w-auto"
-                      target="_blank"
-                    >
-                      <Download size={17} aria-hidden />
-                      Comprobante
-                    </ButtonLink>
+                    <PaymentReceiptActions
+                      data={ticketData}
+                      autoOpen={searchParams?.pago === payment.id}
+                    />
                   </div>
                 </div>
               );

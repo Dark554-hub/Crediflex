@@ -29,6 +29,17 @@ export async function getPaymentReceipt(paymentId: string) {
         include: {
           zone: true,
           installments: true,
+          payments: {
+            where: {
+              cancelledAt: null,
+            },
+            include: {
+              allocations: true,
+            },
+            orderBy: {
+              createdAt: "asc",
+            },
+          },
         },
       },
       allocations: {
