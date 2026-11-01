@@ -34,6 +34,19 @@ export default async function CollectionDayDetailPage({ params }: { params: { id
     notFound();
   }
 
+  const lateFeeSum = await prisma.paymentAllocation.aggregate({
+    where: {
+      payment: {
+        paymentDate: day.collectionDate,
+        cancelledAt: null,
+      },
+    },
+    _sum: {
+      lateFeeApplied: true,
+    },
+  });
+  const totalLateFee = Number(lateFeeSum._sum.lateFeeApplied ?? 0);
+
   return (
     <main className="min-h-screen bg-field pb-8">
       <AppBar title="Detalle de jornada" backHref="/jornadas" />
@@ -46,7 +59,7 @@ export default async function CollectionDayDetailPage({ params }: { params: { id
             <Summary label="Esperado" value={formatCurrency(day.totalExpected)} />
             <Summary label="Cobrado" value={formatCurrency(day.totalCollected)} />
             <Summary label="Pendiente" value={formatCurrency(day.totalPending)} />
-            <Summary label="Mora / no pago" value={formatCurrency(day.totalOverdue)} />
+            <Summary label="Mora" value={formatCurrency(totalLateFee)} />
           </div>
         </div>
       </section>

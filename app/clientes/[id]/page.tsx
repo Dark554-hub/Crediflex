@@ -206,9 +206,10 @@ function CreditHistoryItem({
                 {formatCurrency(installmentBalance(nextInstallment))}
               </p>
             ) : null}
-            {isSettled && credit.paymentEffectiveness ? (
+            {credit.paymentEffectiveness ? (
               <p className="mt-1 text-xs font-semibold text-stone-600">
-                Puntualidad {Math.round(credit.paymentEffectiveness.punctualityRate * 100)}% - Devengado {Math.round(credit.paymentEffectiveness.accruedPaymentRate * 100)}%
+                Efectividad: <span className="font-bold text-moss">{Math.round(credit.paymentEffectiveness.accruedPaymentRate * 100)}%</span> ({credit.paymentEffectiveness.paidAccruedCount} de {credit.paymentEffectiveness.accruedCount} cuotas devengadas)
+                {" · "}Puntualidad: {Math.round(credit.paymentEffectiveness.punctualityRate * 100)}%
               </p>
             ) : null}
           </div>

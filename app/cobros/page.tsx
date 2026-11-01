@@ -5,6 +5,7 @@ import { AppBar } from "@/components/mobile/app-bar";
 import { formatDate } from "@/lib/format";
 import { getOrCreateTodayCollection } from "@/lib/collections";
 import { formatCurrency } from "@/lib/money";
+import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,18 @@ export default async function DailyCollectionsPage({
   searchParams: { q?: string; limit?: string };
 }) {
   const collectionDay = await getOrCreateTodayCollection();
+  const lateFeeSum = await prisma.paymentAllocation.aggregate({
+    where: {
+      payment: {
+        paymentDate: collectionDay.collectionDate,
+        cancelledAt: null,
+      },
+    },
+    _sum: {
+      lateFeeApplied: true,
+    },
+  });
+  const totalLateFee = Number(lateFeeSum._sum.lateFeeApplied ?? 0);
   const query = (searchParams.q ?? "").trim().toLowerCase();
   const limit = Math.min(Math.max(Number(searchParams.limit) || PAGE_SIZE, PAGE_SIZE), 500);
   const visibleItems = collectionDay.items.filter((item) => {
@@ -90,7 +103,7 @@ export default async function DailyCollectionsPage({
             <SummaryItem label="Esperado" value={formatCurrency(collectionDay.totalExpected)} />
             <SummaryItem label="Cobrado" value={formatCurrency(collectionDay.totalCollected)} />
             <SummaryItem label="Pendiente" value={formatCurrency(collectionDay.totalPending)} />
-            <SummaryItem label="Mora / no pago" value={formatCurrency(collectionDay.totalOverdue)} />
+            <SummaryItem label="Mora" value={formatCurrency(totalLateFee)} />
           </div>
         </div>
 

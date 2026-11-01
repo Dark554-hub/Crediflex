@@ -36,17 +36,22 @@ function addDays(date: Date, days: number) {
   return next;
 }
 
-function getWeeklyDueDate(startDate: Date, weeklyCollectionDay: number, installmentNumber: number) {
-  const startDay = startDate.getUTCDay();
-  let daysUntilCollection = (weeklyCollectionDay - startDay + 7) % 7;
-
-  // Si el credito inicia el mismo dia de cobro, la primera cuota semanal cae una semana despues.
-  // Asi evitamos generar una cuota vencida el mismo dia de apertura.
-  if (daysUntilCollection === 0) {
-    daysUntilCollection = 7;
+function getDailyDueDate(startDate: Date, index: number) {
+  const d = new Date(startDate);
+  let count = 0;
+  while (count < index) {
+    d.setUTCDate(d.getUTCDate() + 1);
+    if (d.getUTCDay() !== 0) {
+      count++;
+    }
   }
+  return d;
+}
 
-  return addDays(startDate, daysUntilCollection + (installmentNumber - 1) * 7);
+function getWeeklyDueDate(startDate: Date, weeklyCollectionDay: number, index: number) {
+  const d = new Date(startDate);
+  d.setUTCDate(d.getUTCDate() + index * 7);
+  return d;
 }
 
 export function buildAmortizationSchedule(input: AmortizationInput): AmortizationResult {
@@ -76,14 +81,14 @@ export function buildAmortizationSchedule(input: AmortizationInput): Amortizatio
     const installmentNumber = index + 1;
 
     // Fecha esperada:
-    // credito diario => start_date + N dias.
-    // credito semanal => primer dia de cobro elegido posterior al inicio + 7 dias por cuota.
+    // credito diario => startDate omitiendo domingos.
+    // credito semanal => startDate + (index * 7) dias.
     const dueDate =
       input.type === "daily"
-        ? addDays(input.startDate, installmentNumber)
+        ? getDailyDueDate(input.startDate, index)
         : input.type === "biweekly"
-          ? addDays(input.startDate, installmentNumber * 15)
-          : getWeeklyDueDate(input.startDate, input.weeklyCollectionDay ?? input.startDate.getUTCDay(), installmentNumber);
+          ? addDays(input.startDate, index * 15)
+          : getWeeklyDueDate(input.startDate, input.weeklyCollectionDay ?? input.startDate.getUTCDay(), index);
 
     const principalComponentCents =
       basePrincipalCents + (index >= input.installmentCount - principalRemainder ? 1 : 0);
