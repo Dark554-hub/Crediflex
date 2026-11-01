@@ -125,11 +125,12 @@ export function parseCustomDate(dateStr) {
     const yr = parseInt(parts[2], 10);
     year = yr < 100 ? 2000 + yr : yr;
   }
-  return new Date(Date.UTC(year, month, day, 12, 0, 0));
+  return new Date(Date.UTC(year, month, day, 0, 0, 0));
 }
 
 export function calcDueDate(startDate, freq, index) {
   const d = new Date(startDate);
+  d.setUTCHours(0, 0, 0, 0);
   if (freq === "daily") {
     let count = 0;
     while (count < index) {
@@ -148,7 +149,7 @@ export function calcDueDate(startDate, freq, index) {
     const totalHalfMonths = (isFirstHalf ? 0 : 1) + index;
     const targetMonth = startMonth + Math.floor(totalHalfMonths / 2);
     const targetDay = totalHalfMonths % 2 === 0 ? 1 : 16;
-    return new Date(Date.UTC(startYear, targetMonth, targetDay, 12, 0, 0));
+    return new Date(Date.UTC(startYear, targetMonth, targetDay, 0, 0, 0));
   } else {
     // Semanal (+7 dias)
     d.setUTCDate(d.getUTCDate() + (index * 7));

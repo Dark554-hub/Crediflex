@@ -79,8 +79,6 @@ function calculateLateFee(input: {
 }
 
 async function runAutomaticLateFeeSync(today: Date) {
-  await carryForwardMissedInstallments(today);
-
   const installments = await prisma.creditInstallment.findMany({
     where: {
       dueDate: { lt: today },
@@ -146,99 +144,5 @@ async function runAutomaticLateFeeSync(today: Date) {
 
   if (operations.length > 0) {
     await prisma.$transaction(operations);
-  }
-}
-
-async function carryForwardMissedInstallments(today: Date) {
-  const missedInstallments = await prisma.creditInstallment.findMany({
-    where: {
-      dueDate: { lt: today },
-      status: { in: ["pending", "partial", "overdue"] },
-      credit: { status: { in: ["active", "delinquent"] } },
-    },
-    select: {
-      creditId: true,
-      installmentNumber: true,
-      dueDate: true,
-    },
-    orderBy: [{ creditId: "asc" }, { dueDate: "asc" }, { installmentNumber: "asc" }],
-  });
-
-  const firstMissedByCredit = new Map<string, { installmentNumber: number; dueDate: Date }>();
-
-  for (const installment of missedInstallments) {
-    const current = firstMissedByCredit.get(installment.creditId);
-    if (
-      !current ||
-      installment.dueDate < current.dueDate ||
-      (installment.dueDate.getTime() === current.dueDate.getTime() &&
-        installment.installmentNumber < current.installmentNumber)
-    ) {
-      firstMissedByCredit.set(installment.creditId, {
-        installmentNumber: installment.installmentNumber,
-        dueDate: installment.dueDate,
-      });
-    }
-  }
-
-  const allOperations: Prisma.PrismaPromise<unknown>[] = [];
-
-  for (const [creditId, firstMissed] of Array.from(firstMissedByCredit.entries())) {
-    const daysToMove = daysBetweenUtcDates(firstMissed.dueDate, today);
-    if (daysToMove <= 0) continue;
-
-    const installmentsToMove = await prisma.creditInstallment.findMany({
-      where: {
-        creditId,
-        installmentNumber: { gte: firstMissed.installmentNumber },
-        status: { in: ["pending", "partial", "overdue"] },
-      },
-      select: {
-        id: true,
-        dueDate: true,
-        status: true,
-      },
-      orderBy: { installmentNumber: "asc" },
-    });
-
-    if (installmentsToMove.length === 0) continue;
-
-    for (const installment of installmentsToMove) {
-      allOperations.push(
-        prisma.creditInstallment.update({
-          where: { id: installment.id },
-          data: {
-            dueDate: addDaysUtc(installment.dueDate, daysToMove),
-            status: installment.status === "overdue" ? "pending" : installment.status,
-          },
-        }),
-      );
-    }
-
-    const lastDueDate = installmentsToMove.reduce<Date | null>((last, installment) => {
-      const movedDate = addDaysUtc(installment.dueDate, daysToMove);
-      return !last || movedDate > last ? movedDate : last;
-    }, null);
-
-    if (lastDueDate) {
-      allOperations.push(
-        prisma.credit.update({
-          where: { id: creditId },
-          data: {
-            expectedEndDate: lastDueDate,
-            status: "active",
-            settledAt: null,
-          },
-        }),
-      );
-    }
-  }
-
-  if (allOperations.length > 0) {
-    const batchSize = 25;
-    for (let i = 0; i < allOperations.length; i += batchSize) {
-      const batch = allOperations.slice(i, i + batchSize);
-      await prisma.$transaction(batch);
-    }
   }
 }

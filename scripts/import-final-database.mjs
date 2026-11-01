@@ -132,8 +132,7 @@ async function main() {
 
   // 5. Crear Clientes y sus Créditos
   let clientCounter = 0;
-  const todayOnly = new Date();
-  todayOnly.setUTCHours(0, 0, 0, 0);
+  const todayOnly = new Date(Date.UTC(2026, 9, 31, 0, 0, 0));
 
   for (const [normKey, cData] of clientsMap.entries()) {
     clientCounter++;
@@ -166,7 +165,20 @@ async function main() {
 
     // Procesar cada crédito del cliente
     for (const cr of cData.credits) {
-      const startDate = parseCustomDate(cr.fechaInicio);
+      let startDate = parseCustomDate(cr.fechaInicio);
+
+      // Corrección de fechas erróneas en el Excel contra el día de cobro real pactado:
+      if (normKey.includes("beatriz") && cr.quota === 525) {
+        // En Excel decía 6-Sep (domingo), pero su día es sábado -> 5-Sep-2026
+        startDate = new Date(Date.UTC(2026, 8, 5, 0, 0, 0));
+      } else if (normKey.includes("manuela") && cr.quota === 1000) {
+        // En Excel decía 27-Jul (lunes), pero su día es miércoles -> 29-Jul-2026
+        startDate = new Date(Date.UTC(2026, 6, 29, 0, 0, 0));
+      } else if (normKey.includes("manuela") && cr.quota === 720) {
+        // En Excel decía 13-Sep (domingo), pero su día es miércoles -> 16-Sep-2026
+        startDate = new Date(Date.UTC(2026, 8, 16, 0, 0, 0));
+      }
+
       const creditType =
         cr.freq.includes("diario")
           ? "daily"
@@ -185,6 +197,16 @@ async function main() {
       const expectedEndDate = calcDueDate(startDate, creditType, count - 1);
       const isSettled = cr.cuotasPagadas >= count;
 
+      // Calcular cuotas que debieron pagarse antes de hoy para definir morosidad
+      let pastDueBeforeToday = 0;
+      for (let i = 1; i <= count; i++) {
+        const dDate = calcDueDate(startDate, creditType, i - 1);
+        if (dDate < todayOnly) {
+          pastDueBeforeToday++;
+        }
+      }
+      const isDelinquent = !isSettled && cr.cuotasPagadas < pastDueBeforeToday;
+
       const credit = await prisma.credit.create({
         data: {
           clientId: client.id,
@@ -200,12 +222,19 @@ async function main() {
           weeklyCollectionDay: weeklyCobroDay,
           startDate,
           expectedEndDate,
-          status: isSettled ? "settled" : "active",
+          status: isSettled ? "settled" : isDelinquent ? "delinquent" : "active",
         },
       });
 
+      if (isDelinquent) {
+        await prisma.client.update({
+          where: { id: client.id },
+          data: { status: "delinquent" },
+        });
+      }
+
       console.log(
-        `   💳 Crédito #${credit.creditNumber}: $${principal} (${creditType}, ${count} de $${quota}, ${cr.cuotasPagadas} pagadas)`
+        `   💳 Crédito #${credit.creditNumber}: $${principal} (${creditType}, ${count} de $${quota}, ${cr.cuotasPagadas} pagadas, estado: ${credit.status})`
       );
 
       // Desglose de cuotas con componentes exactos
