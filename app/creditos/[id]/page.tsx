@@ -1,8 +1,8 @@
-import { CircleDollarSign, Handshake, ListChecks, Plus } from "lucide-react";
+import { CircleDollarSign, Handshake, ListChecks, Plus, Settings2 } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createAgreementAction } from "@/app/creditos/[id]/convenios/actions";
-import { cancelCreditAction, cancelLastPaymentAction } from "@/app/creditos/[id]/actions";
+import { cancelCreditAction, cancelLastPaymentAction, updateCreditDetailsAction } from "@/app/creditos/[id]/actions";
 import { CreditStatusBadge } from "@/components/credits/credit-status-badge";
 import { InstallmentStatusBadge } from "@/components/credits/installment-status-badge";
 import { SettlementCalculator } from "@/components/credits/settlement-calculator";
@@ -66,6 +66,7 @@ export default async function CreditDetailPage({
   const settlement = calculateSettlement(credit);
   const isExpress = credit.productType === "express";
   const creditEffectiveness = credit.paymentEffectiveness;
+  const startDateIso = new Date(credit.startDate).toISOString().slice(0, 10);
 
   return (
     <main className="min-h-screen bg-field pb-24">
@@ -116,6 +117,97 @@ export default async function CreditDetailPage({
             </form>
           ) : null}
         </div>
+      </section>
+
+      <section id="editar-prestamo" className="mx-auto mt-4 max-w-3xl rounded-md border border-line bg-white/75 p-4 sm:p-6">
+        <div className="flex items-center gap-2">
+          <Settings2 size={20} className="text-moss" aria-hidden />
+          <h2 className="text-xl font-black text-ink">Editar datos de cobro del prestamo</h2>
+        </div>
+        <p className="mt-1 text-xs font-semibold text-stone-600">
+          Ajusta el dia de cobro, la fecha de inicio, la frecuencia o la zona y actualiza las fechas de la tabla de pagos.
+        </p>
+
+        <form action={updateCreditDetailsAction} className="mt-4 grid gap-3 sm:grid-cols-2">
+          <input type="hidden" name="creditId" value={credit.id} />
+
+          <label className="space-y-1.5">
+            <span className="text-sm font-semibold text-ink">Fecha de inicio</span>
+            <input
+              name="startDate"
+              type="date"
+              defaultValue={startDateIso}
+              required
+              className="min-h-11 w-full rounded-md border border-line bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-moss focus:ring-4 focus:ring-moss/10"
+            />
+          </label>
+
+          <label className="space-y-1.5">
+            <span className="text-sm font-semibold text-ink">Frecuencia de pago</span>
+            <select
+              name="type"
+              defaultValue={credit.type}
+              className="min-h-11 w-full rounded-md border border-line bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-moss focus:ring-4 focus:ring-moss/10"
+            >
+              <option value="weekly">Semanal</option>
+              <option value="biweekly">Quincenal</option>
+              <option value="daily">Diario</option>
+            </select>
+          </label>
+
+          <label className="space-y-1.5">
+            <span className="text-sm font-semibold text-ink">Dia de cobro (Semanal)</span>
+            <select
+              name="weeklyCollectionDay"
+              defaultValue={String(credit.weeklyCollectionDay ?? new Date(credit.startDate).getUTCDay())}
+              className="min-h-11 w-full rounded-md border border-line bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-moss focus:ring-4 focus:ring-moss/10"
+            >
+              <option value="0">Domingo</option>
+              <option value="1">Lunes</option>
+              <option value="2">Martes</option>
+              <option value="3">Miercoles</option>
+              <option value="4">Jueves</option>
+              <option value="5">Viernes</option>
+              <option value="6">Sabado</option>
+            </select>
+          </label>
+
+          <label className="space-y-1.5">
+            <span className="text-sm font-semibold text-ink">Zona de cobro</span>
+            <select
+              name="zoneId"
+              defaultValue={credit.zoneId}
+              className="min-h-11 w-full rounded-md border border-line bg-white px-3 text-sm font-semibold text-ink outline-none transition focus:border-moss focus:ring-4 focus:ring-moss/10"
+            >
+              {credit.zones.map((zone) => (
+                <option key={zone.id} value={zone.id}>
+                  {zone.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="flex items-center gap-2.5 sm:col-span-2">
+            <input
+              type="checkbox"
+              name="recalculateSchedule"
+              defaultChecked
+              className="h-5 w-5 accent-moss"
+            />
+            <span className="text-sm font-semibold text-ink">
+              Recalcular automaticamente las fechas de la tabla de pagos segun la fecha de inicio y el dia de cobro
+            </span>
+          </label>
+
+          <div className="sm:col-span-2">
+            <button
+              type="submit"
+              className="min-h-11 w-full rounded-md bg-ink px-4 text-sm font-extrabold text-white shadow-soft transition hover:bg-moss sm:w-auto"
+            >
+              Guardar cambios del prestamo
+            </button>
+          </div>
+        </form>
       </section>
 
       <div id="liquidar">

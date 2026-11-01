@@ -100,53 +100,60 @@ export async function getCredits(filters: CreditFilters) {
 export async function getCreditById(id: string) {
   void syncAutomaticLateFees();
 
-  const credit = await prisma.credit.findUnique({
-    where: { id },
-    include: {
-      client: true,
-      zone: true,
-      installments: {
-        include: {
-          allocations: {
-            include: {
-              payment: true,
-            },
-            orderBy: {
-              createdAt: "asc",
-            },
-          },
-        },
-        orderBy: {
-          installmentNumber: "asc",
-        },
-      },
-      payments: {
-        where: {
-          cancelledAt: null,
-        },
-        include: {
-          allocations: {
-            include: {
-              installment: true,
+  const [credit, zones] = await Promise.all([
+    prisma.credit.findUnique({
+      where: { id },
+      include: {
+        client: true,
+        zone: true,
+        installments: {
+          include: {
+            allocations: {
+              include: {
+                payment: true,
+              },
+              orderBy: {
+                createdAt: "asc",
+              },
             },
           },
+          orderBy: {
+            installmentNumber: "asc",
+          },
         },
-        orderBy: {
-          createdAt: "desc",
+        payments: {
+          where: {
+            cancelledAt: null,
+          },
+          include: {
+            allocations: {
+              include: {
+                installment: true,
+              },
+            },
+          },
+          orderBy: {
+            createdAt: "desc",
+          },
+        },
+        agreements: {
+          orderBy: {
+            promisedPaymentDate: "asc",
+          },
         },
       },
-      agreements: {
-        orderBy: {
-          promisedPaymentDate: "asc",
-        },
-      },
-    },
-  });
+    }),
+    prisma.zone.findMany({
+      where: { isActive: true },
+      orderBy: { name: "asc" },
+    }),
+  ]);
 
   if (!credit) return null;
 
   return {
     ...credit,
+    zones,
     paymentEffectiveness: calculatePaymentEffectiveness(credit.installments),
   };
 }

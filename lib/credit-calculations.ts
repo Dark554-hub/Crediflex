@@ -50,7 +50,9 @@ function getDailyDueDate(startDate: Date, index: number) {
 
 function getWeeklyDueDate(startDate: Date, weeklyCollectionDay: number, index: number) {
   const d = new Date(startDate);
-  d.setUTCDate(d.getUTCDate() + index * 7);
+  const currentDay = d.getUTCDay();
+  const diffToCollectionDay = (weeklyCollectionDay - currentDay + 7) % 7;
+  d.setUTCDate(d.getUTCDate() + diffToCollectionDay + index * 7);
   return d;
 }
 
