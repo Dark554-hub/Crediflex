@@ -19,9 +19,32 @@ export type PaymentTicketData = {
   saldo: string; // formatted currency e.g. $1,800.00
   cuotasPagadas: string; // e.g. "12.0 de 16.0"
   cuotasAbonadas: string; // e.g. "1.0"
+  pagosAtrasados: number; // e.g. 0, 1..5, >=6
   diaPrestado: string; // DD/MM/YYYY
   reciboGenerado: string; // DD/MM/YYYY
 };
+
+function getOverdueColor(count: number) {
+  if (count === 0) {
+    return {
+      hex: "#15803d", // green
+      bgHex: "#dcfce7",
+      textClass: "text-green-700 bg-green-100 border-green-300",
+    };
+  }
+  if (count <= 5) {
+    return {
+      hex: "#b45309", // yellow/amber
+      bgHex: "#fef3c7",
+      textClass: "text-amber-700 bg-amber-100 border-amber-300",
+    };
+  }
+  return {
+    hex: "#b91c1c", // red
+    bgHex: "#fee2e2",
+    textClass: "text-red-700 bg-red-100 border-red-300",
+  };
+}
 
 function wrapCanvasText(
   ctx: CanvasRenderingContext2D,
@@ -48,7 +71,7 @@ function wrapCanvasText(
 export async function generateTicketImageBlob(data: PaymentTicketData): Promise<Blob> {
   const canvas = document.createElement("canvas");
   const width = 760;
-  const height = 1340;
+  const height = 1400;
   canvas.width = width;
   canvas.height = height;
 
@@ -149,6 +172,7 @@ export async function generateTicketImageBlob(data: PaymentTicketData): Promise<
 
   // Left-Right rows
   const drawRow = (label: string, val: string) => {
+    ctx.fillStyle = "#111111";
     ctx.textAlign = "left";
     ctx.font = "33px Arial, Helvetica, sans-serif";
     ctx.fillText(label, marginX, y);
@@ -159,6 +183,33 @@ export async function generateTicketImageBlob(data: PaymentTicketData): Promise<
 
   drawRow("Cuotas Pagadas:", data.cuotasPagadas);
   drawRow("Cuotas abonadas:", data.cuotasAbonadas);
+
+  // Pagos atrasados row with traffic-light color
+  const overdueStyle = getOverdueColor(data.pagosAtrasados);
+  const overdueValText = String(data.pagosAtrasados);
+  ctx.fillStyle = overdueStyle.hex;
+  ctx.textAlign = "left";
+  ctx.font = "bold 33px Arial, Helvetica, sans-serif";
+  ctx.fillText("Pagos atrasados:", marginX, y);
+
+  ctx.font = "bold 33px Arial, Helvetica, sans-serif";
+  const badgeTextWidth = ctx.measureText(overdueValText).width;
+  const badgePadX = 18;
+  const badgeHeight = 42;
+  const badgeWidth = Math.max(badgeTextWidth + badgePadX * 2, 56);
+  const badgeX = rightX - badgeWidth;
+  const badgeY = y - 32;
+
+  ctx.fillStyle = overdueStyle.bgHex;
+  ctx.beginPath();
+  ctx.roundRect(badgeX, badgeY, badgeWidth, badgeHeight, 10);
+  ctx.fill();
+
+  ctx.fillStyle = overdueStyle.hex;
+  ctx.textAlign = "center";
+  ctx.fillText(overdueValText, badgeX + badgeWidth / 2, y);
+  y += 50;
+
   drawRow("Dia Prestado:", data.diaPrestado);
   y -= 26;
 
@@ -169,6 +220,7 @@ export async function generateTicketImageBlob(data: PaymentTicketData): Promise<
   ctx.stroke();
   y += 50;
 
+  ctx.fillStyle = "#111111";
   ctx.textAlign = "left";
   ctx.font = "33px Arial, Helvetica, sans-serif";
   ctx.fillText("Gracias por confiar en nosotros.", marginX, y);
@@ -205,6 +257,7 @@ export function PaymentReceiptActions({
   }, [autoOpen]);
 
   const pdfUrl = `/creditos/${data.creditId}/pagos/${data.paymentId}/comprobante`;
+  const overdueStyle = getOverdueColor(data.pagosAtrasados);
 
   async function handleShareImage() {
     setSharingImage(true);
@@ -349,6 +402,16 @@ export function PaymentReceiptActions({
                 <div className="flex justify-between py-0.5">
                   <span>Cuotas abonadas:</span>
                   <span>{data.cuotasAbonadas}</span>
+                </div>
+                <div className="flex items-center justify-between py-1">
+                  <span className={`font-bold ${overdueStyle.textClass.split(" ")[0]}`}>
+                    Pagos atrasados:
+                  </span>
+                  <span
+                    className={`inline-flex min-w-7 items-center justify-center rounded-md border px-2 py-0.5 text-sm font-extrabold ${overdueStyle.textClass}`}
+                  >
+                    {data.pagosAtrasados}
+                  </span>
                 </div>
                 <div className="flex justify-between py-0.5">
                   <span>Dia Prestado:</span>

@@ -75,6 +75,25 @@ function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): 
   return lines.length > 0 ? lines : [text];
 }
 
+function getOverduePdfColors(count: number) {
+  if (count === 0) {
+    return {
+      text: rgb(0.08, 0.5, 0.24), // green
+      bg: rgb(0.86, 0.99, 0.91),
+    };
+  }
+  if (count <= 5) {
+    return {
+      text: rgb(0.71, 0.33, 0.04), // amber/yellow
+      bg: rgb(1.0, 0.95, 0.78),
+    };
+  }
+  return {
+    text: rgb(0.73, 0.11, 0.11), // red
+    bg: rgb(1.0, 0.89, 0.89),
+  };
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: { id: string; paymentId: string } },
@@ -86,7 +105,7 @@ export async function GET(
   }
 
   const pageWidth = 280;
-  const pageHeight = 520;
+  const pageHeight = 545;
   const marginX = 18;
   const rightX = pageWidth - marginX;
   const contentWidth = pageWidth - marginX * 2;
@@ -109,6 +128,24 @@ export async function GET(
       sum + p.allocations.reduce((allocSum, alloc) => allocSum + Number(alloc.amountApplied), 0),
     0,
   );
+
+  // Calculate overdue installments as of the payment date
+  const paidByInstallment = new Map<string, number>();
+  for (const p of paymentsUpToThis) {
+    for (const alloc of p.allocations) {
+      paidByInstallment.set(
+        alloc.installmentId,
+        (paidByInstallment.get(alloc.installmentId) ?? 0) + Number(alloc.amountApplied),
+      );
+    }
+  }
+  const paymentDateTime = new Date(payment.paymentDate).getTime();
+  const pagosAtrasados = payment.credit.installments.filter((inst) => {
+    const dueTime = new Date(inst.dueDate).getTime();
+    const paid = paidByInstallment.get(inst.id) ?? 0;
+    const scheduled = Number(inst.scheduledAmount);
+    return dueTime < paymentDateTime && paid + 0.01 < scheduled;
+  }).length;
 
   const totalAmount = Number(payment.credit.totalAmount);
   const pendingBalance = Math.max(totalAmount - cumulativeOrdinaryPaid, 0);
@@ -203,7 +240,30 @@ export async function GET(
 
   drawText(page, "Cuotas abonadas:", marginX, y, regular, 11);
   drawRightText(page, abonadasInstallments.toFixed(1), rightX, y, regular, 11);
-  y -= 17;
+  y -= 18;
+
+  // Pagos atrasados row with traffic-light color
+  const overdueColors = getOverduePdfColors(pagosAtrasados);
+  const overdueText = String(pagosAtrasados);
+  const overdueWidth = Math.max(bold.widthOfTextAtSize(overdueText, 11) + 12, 22);
+  page.drawRectangle({
+    x: rightX - overdueWidth,
+    y: y - 3,
+    width: overdueWidth,
+    height: 15,
+    color: overdueColors.bg,
+  });
+  drawText(page, "Pagos atrasados:", marginX, y, bold, 11, overdueColors.text);
+  drawText(
+    page,
+    overdueText,
+    rightX - overdueWidth + (overdueWidth - bold.widthOfTextAtSize(overdueText, 11)) / 2,
+    y,
+    bold,
+    11,
+    overdueColors.text,
+  );
+  y -= 18;
 
   drawText(page, "Dia Prestado:", marginX, y, regular, 11);
   drawRightText(page, formatShortDate(payment.credit.startDate), rightX, y, regular, 11);

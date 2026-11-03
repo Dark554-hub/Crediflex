@@ -335,6 +335,23 @@ export default async function CreditDetailPage({
               const paidInstallmentsCount = Math.min(cumulativeOrdinaryPaid / installmentAmount, totalInstallments);
               const abonadasInstallmentsCount = ordinaryTotal / installmentAmount;
 
+              const paidByInstallment = new Map<string, number>();
+              for (const p of paymentsUpToThis) {
+                for (const alloc of p.allocations) {
+                  paidByInstallment.set(
+                    alloc.installmentId,
+                    (paidByInstallment.get(alloc.installmentId) ?? 0) + Number(alloc.amountApplied),
+                  );
+                }
+              }
+              const paymentDateTime = new Date(payment.paymentDate).getTime();
+              const pagosAtrasados = credit.installments.filter((inst) => {
+                const dueTime = new Date(inst.dueDate).getTime();
+                const paid = paidByInstallment.get(inst.id) ?? 0;
+                const scheduled = Number(inst.scheduledAmount);
+                return dueTime < paymentDateTime && paid + 0.01 < scheduled;
+              }).length;
+
               const ticketData: PaymentTicketData = {
                 paymentId: payment.id,
                 creditId: credit.id,
@@ -350,6 +367,7 @@ export default async function CreditDetailPage({
                 saldo: formatCurrency(pendingBalanceAfterPayment),
                 cuotasPagadas: `${paidInstallmentsCount.toFixed(1)} de ${totalInstallments.toFixed(1)}`,
                 cuotasAbonadas: abonadasInstallmentsCount.toFixed(1),
+                pagosAtrasados,
                 diaPrestado: formatShortDate(credit.startDate),
                 reciboGenerado: formatShortDate(payment.paymentDate),
               };
