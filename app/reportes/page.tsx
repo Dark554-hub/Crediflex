@@ -36,7 +36,7 @@ const reports = [
   {
     title: "Creditos activos completos (Incluye atrasados)",
     detail:
-      "Todos los creditos vigentes y en atraso con fecha de otorgamiento, capital, total a pagar, pagos hechos, pagos atrasados, monto en atraso, abonado y saldo pendiente.",
+      "Todos los creditos vigentes y en atraso con fecha de otorgamiento, capital, total a pagar, pagos hechos (cerrados), mora pagada aparte, pagos atrasados, abonado y saldo pendiente.",
     href: "/reportes/exportar?tipo=activos",
     highlight: true,
   },
@@ -54,7 +54,7 @@ const reports = [
   },
   {
     title: "Resumen de ganancias",
-    detail: "Capital, intereses generados, intereses cobrados, pagos hechos, atrasados y saldos.",
+    detail: "Capital, intereses generados, intereses cobrados, pagos hechos, mora pagada y saldos.",
     href: "/reportes/exportar?tipo=ganancias",
     highlight: false,
   },
@@ -82,7 +82,11 @@ export default async function ReportsPage({
         client: true,
         zone: true,
         installments: { orderBy: { installmentNumber: "asc" } },
-        payments: { where: { cancelledAt: null }, orderBy: { paymentDate: "desc" } },
+        payments: {
+          where: { cancelledAt: null },
+          include: { allocations: true },
+          orderBy: { paymentDate: "desc" },
+        },
       },
       orderBy: [{ zone: { name: "asc" } }, { creditNumber: "asc" }],
     }),
@@ -93,20 +97,35 @@ export default async function ReportsPage({
   ]);
 
   const enrichedCredits = activeCredits.map((credit) => {
-    const totalPaid = credit.installments.reduce(
-      (sum, inst) => sum + Number(inst.paidAmount),
+    const ordinaryPaid = credit.installments.reduce(
+      (sum, inst) => sum + Math.min(Number(inst.paidAmount), Number(inst.scheduledAmount)),
       0,
     );
-    const pendingSaldo = balance(credit.installments);
+    const lateFeePaidFromInstallments = credit.installments.reduce(
+      (sum, inst) => sum + Math.max(Number(inst.paidAmount) - Number(inst.scheduledAmount), 0),
+      0,
+    );
+    const lateFeePaidFromAllocations = credit.payments.reduce(
+      (sum, p) =>
+        sum + p.allocations.reduce((aSum, alloc) => aSum + Number(alloc.lateFeeApplied), 0),
+      0,
+    );
+    const moraPagada = Math.max(lateFeePaidFromInstallments, lateFeePaidFromAllocations);
+
+    const totalAmount = Number(credit.totalAmount);
+    const pendingSaldo = Math.max(totalAmount - ordinaryPaid, 0);
     const installmentAmt = Number(credit.installmentAmount) || 1;
-    const paidInstallmentsRatio = (totalPaid / installmentAmt).toFixed(1);
-    const fullPaidCount = credit.installments.filter((inst) => inst.status === "paid").length;
+    // Closed whole payments (excluding late fees)
+    const closedPaidCount = Math.min(
+      Math.round(ordinaryPaid / installmentAmt),
+      credit.installmentCount,
+    );
 
     const overdueInstallments = credit.installments.filter(
       (inst) =>
         new Date(inst.dueDate).getTime() < todayUtc.getTime() &&
         ["pending", "partial", "overdue"].includes(inst.status) &&
-        Number(inst.scheduledAmount) + Number(inst.lateFeeAmount) - Number(inst.paidAmount) > 0.01,
+        Number(inst.scheduledAmount) - Math.min(Number(inst.paidAmount), Number(inst.scheduledAmount)) > 0.01,
     );
     const overdueCount = overdueInstallments.length;
     const overdueAmount = balance(overdueInstallments);
@@ -114,10 +133,10 @@ export default async function ReportsPage({
 
     return {
       credit,
-      totalPaid,
+      ordinaryPaid,
+      moraPagada,
       pendingSaldo,
-      paidInstallmentsRatio,
-      fullPaidCount,
+      closedPaidCount,
       overdueCount,
       overdueAmount,
       lastPayment,
@@ -134,7 +153,8 @@ export default async function ReportsPage({
     (s, item) => s + Number(item.credit.principalAmount),
     0,
   );
-  const totalPaidSum = filteredCredits.reduce((s, item) => s + item.totalPaid, 0);
+  const totalOrdinaryPaidSum = filteredCredits.reduce((s, item) => s + item.ordinaryPaid, 0);
+  const totalMoraPaidSum = filteredCredits.reduce((s, item) => s + item.moraPagada, 0);
   const totalPendingSum = filteredCredits.reduce((s, item) => s + item.pendingSaldo, 0);
   const totalOverdueCredits = filteredCredits.filter((item) => item.overdueCount > 0).length;
 
@@ -151,7 +171,7 @@ export default async function ReportsPage({
                 <h1 className="text-2xl font-extrabold">Reportes de Creditos Activos y Exportacion</h1>
               </div>
               <p className="mt-2 text-sm leading-6 text-white/75">
-                Consulta en pantalla o descarga en Excel todos los datos de los creditos activos (incluyendo los atrasados): fecha de otorgamiento, pagos hechos, pagos atrasados, abonado y saldo.
+                Consulta en pantalla o descarga en Excel todos los datos de los creditos activos (incluyendo los atrasados): fecha de otorgamiento, pagos hechos cerrados, mora pagada en columna aparte, pagos atrasados, abonado y saldo.
               </p>
             </div>
             <a
@@ -163,7 +183,7 @@ export default async function ReportsPage({
             </a>
           </div>
 
-          <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-5">
             <div className="rounded-md bg-white/10 p-3">
               <p className="text-xs font-semibold text-white/70">Creditos activos</p>
               <p className="mt-1 text-xl font-black">
@@ -178,8 +198,12 @@ export default async function ReportsPage({
               <p className="mt-1 text-xl font-black">{formatCurrency(totalActiveCapital)}</p>
             </div>
             <div className="rounded-md bg-white/10 p-3">
-              <p className="text-xs font-semibold text-white/70">Total abonado</p>
-              <p className="mt-1 text-xl font-black text-mint">{formatCurrency(totalPaidSum)}</p>
+              <p className="text-xs font-semibold text-white/70">Abonado a cuotas</p>
+              <p className="mt-1 text-xl font-black text-mint">{formatCurrency(totalOrdinaryPaidSum)}</p>
+            </div>
+            <div className="rounded-md bg-white/10 p-3">
+              <p className="text-xs font-semibold text-white/70">Mora pagada</p>
+              <p className="mt-1 text-xl font-black text-amber-300">{formatCurrency(totalMoraPaidSum)}</p>
             </div>
             <div className="rounded-md bg-white/10 p-3">
               <p className="text-xs font-semibold text-white/70">Saldo por recuperar</p>
@@ -221,7 +245,7 @@ export default async function ReportsPage({
                 Detalle de creditos activos ({filteredCredits.length})
               </h2>
               <p className="mt-0.5 text-xs font-semibold text-stone-500">
-                Incluye todos los creditos activos al corriente y en atraso.
+                Pagos hechos en numeros cerrados (sin sumar la mora) y mora pagada en columna independiente.
               </p>
             </div>
 
@@ -262,7 +286,7 @@ export default async function ReportsPage({
           </div>
 
           <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[980px] border-collapse text-left text-xs">
+            <table className="w-full min-w-[1060px] border-collapse text-left text-xs">
               <thead>
                 <tr className="border-b-2 border-line bg-field text-[11px] font-black uppercase tracking-wider text-stone-600">
                   <th className="px-3 py-3">Folio / Cliente</th>
@@ -272,7 +296,8 @@ export default async function ReportsPage({
                   <th className="px-3 py-3">Cuota</th>
                   <th className="px-3 py-3">Pagos Hechos</th>
                   <th className="px-3 py-3">Pagos Atrasados</th>
-                  <th className="px-3 py-3">Abonado</th>
+                  <th className="px-3 py-3">Abonado Cuotas</th>
+                  <th className="px-3 py-3">Mora Pagada</th>
                   <th className="px-3 py-3">Saldo Pendiente</th>
                   <th className="px-3 py-3">Ultimo Pago</th>
                   <th className="px-3 py-3 text-right">Acciones</th>
@@ -281,13 +306,13 @@ export default async function ReportsPage({
               <tbody className="divide-y divide-line">
                 {filteredCredits.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="px-4 py-8 text-center text-sm font-semibold text-stone-500">
+                    <td colSpan={12} className="px-4 py-8 text-center text-sm font-semibold text-stone-500">
                       No hay creditos activos para los filtros seleccionados.
                     </td>
                   </tr>
                 ) : (
                   filteredCredits.map((item) => {
-                    const { credit, totalPaid, pendingSaldo, paidInstallmentsRatio, overdueCount, overdueAmount, lastPayment } = item;
+                    const { credit, ordinaryPaid, moraPagada, pendingSaldo, closedPaidCount, overdueCount, overdueAmount, lastPayment } = item;
                     const overdueBadgeClass =
                       overdueCount === 0
                         ? "bg-green-100 text-green-800 border-green-300"
@@ -329,7 +354,7 @@ export default async function ReportsPage({
                         </td>
                         <td className="px-3 py-3">
                           <span className="font-extrabold text-ink">
-                            {paidInstallmentsRatio} de {credit.installmentCount.toFixed(1)}
+                            {closedPaidCount} de {credit.installmentCount}
                           </span>
                         </td>
                         <td className="px-3 py-3">
@@ -347,7 +372,10 @@ export default async function ReportsPage({
                           </div>
                         </td>
                         <td className="px-3 py-3 font-extrabold text-moss">
-                          {formatCurrency(totalPaid)}
+                          {formatCurrency(ordinaryPaid)}
+                        </td>
+                        <td className="px-3 py-3 font-extrabold text-amber-700">
+                          {formatCurrency(moraPagada)}
                         </td>
                         <td className="px-3 py-3 font-extrabold text-ink">
                           {formatCurrency(pendingSaldo)}

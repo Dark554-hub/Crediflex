@@ -107,6 +107,10 @@ function buildDetailedCreditRow(
     payments: Array<{
       amount: unknown;
       paymentDate: Date;
+      allocations?: Array<{
+        amountApplied: unknown;
+        lateFeeApplied: unknown;
+      }>;
     }>;
   },
   today: Date,
@@ -114,25 +118,47 @@ function buildDetailedCreditRow(
   const sortedInstallments = [...credit.installments].sort(
     (a, b) => a.installmentNumber - b.installmentNumber,
   );
-  const totalPaid = sortedInstallments.reduce(
-    (sum, inst) => sum + Number(inst.paidAmount),
+
+  // Separate ordinary paid from late fees paid
+  const ordinaryPaidFromInstallments = sortedInstallments.reduce(
+    (sum, inst) => sum + Math.min(Number(inst.paidAmount), Number(inst.scheduledAmount)),
     0,
   );
-  const pendingSaldo = balance(sortedInstallments);
+  const lateFeePaidFromInstallments = sortedInstallments.reduce(
+    (sum, inst) => sum + Math.max(Number(inst.paidAmount) - Number(inst.scheduledAmount), 0),
+    0,
+  );
+
+  // Also check allocations if present
+  const lateFeePaidFromAllocations = credit.payments.reduce(
+    (sum, p) =>
+      sum +
+      (p.allocations?.reduce((aSum, alloc) => aSum + Number(alloc.lateFeeApplied), 0) ?? 0),
+    0,
+  );
+
+  const moraPagada = Math.max(lateFeePaidFromInstallments, lateFeePaidFromAllocations);
+  const ordinaryPaid = ordinaryPaidFromInstallments;
+  const totalAmount = Number(credit.totalAmount);
+  const pendingOrdinarySaldo = Math.max(totalAmount - ordinaryPaid, 0);
+
   const installmentAmt = Number(credit.installmentAmount) || 1;
-  const exactPaidInstallments = Number((totalPaid / installmentAmt).toFixed(1));
-  const fullPaidCount = sortedInstallments.filter((inst) => inst.status === "paid").length;
+  // Whole closed payments (excluding late fees)
+  const closedPaidInstallments = Math.min(
+    Math.round(ordinaryPaid / installmentAmt),
+    credit.installmentCount,
+  );
 
   const overdueInstallments = sortedInstallments.filter(
     (inst) =>
       new Date(inst.dueDate).getTime() < today.getTime() &&
       ["pending", "partial", "overdue"].includes(inst.status) &&
-      Number(inst.scheduledAmount) + Number(inst.lateFeeAmount) - Number(inst.paidAmount) > 0.01,
+      Number(inst.scheduledAmount) - Math.min(Number(inst.paidAmount), Number(inst.scheduledAmount)) > 0.01,
   );
   const overdueCount = overdueInstallments.length;
   const overdueAmount = balance(overdueInstallments);
 
-  const pendingInstallmentsCount = Math.max(credit.installmentCount - fullPaidCount, 0);
+  const pendingInstallmentsCount = Math.max(credit.installmentCount - closedPaidInstallments, 0);
   const nextPendingInstallment = sortedInstallments.find(
     (inst) =>
       ["pending", "partial", "overdue"].includes(inst.status) &&
@@ -160,16 +186,16 @@ function buildDetailedCreditRow(
     "Capital Prestado": Number(credit.principalAmount),
     "Tasa Interes (%)": Number((Number(credit.interestRate) * 100).toFixed(2)),
     "Interes / Financiamiento": Number(credit.interestAmount),
-    "Total a Pagar": Number(credit.totalAmount),
+    "Total a Pagar": totalAmount,
     "Valor Cuota": Number(credit.installmentAmount),
     "Total Cuotas": credit.installmentCount,
-    "Pagos Hechos (Cuotas)": exactPaidInstallments,
-    "Cuotas Completas Pagadas": fullPaidCount,
+    "Pagos Hechos": closedPaidInstallments,
     "Cuotas Pendientes": pendingInstallmentsCount,
-    "Pagos Atrasados (Cuotas)": overdueCount,
+    "Pagos Atrasados": overdueCount,
     "Monto Atrasado": Number(overdueAmount.toFixed(2)),
-    "Total Abonado ($)": Number(totalPaid.toFixed(2)),
-    "Saldo Pendiente ($)": Number(pendingSaldo.toFixed(2)),
+    "Abonado a Cuotas ($)": Number(ordinaryPaid.toFixed(2)),
+    "Mora Pagada ($)": Number(moraPagada.toFixed(2)),
+    "Saldo Pendiente ($)": Number(pendingOrdinarySaldo.toFixed(2)),
     "Fecha Ultimo Pago": lastPayment ? dateLabel(lastPayment.paymentDate) : "Sin pagos",
     "Monto Ultimo Pago": lastPayment ? Number(lastPayment.amount) : 0,
     "Proximo Vencimiento": nextPendingInstallment ? dateLabel(nextPendingInstallment.dueDate) : "-",
@@ -209,29 +235,37 @@ export async function GET(request: NextRequest) {
     addSheet(
       workbook,
       "Pagos",
-      payments.map((payment) => ({
-        Fecha: dateLabel(payment.paymentDate),
-        "Folio Credito": payment.credit.creditNumber ? `#${payment.credit.creditNumber}` : "-",
-        Cliente: payment.client.fullName,
-        Telefono: payment.client.phone || "-",
-        Direccion: payment.client.address,
-        Zona: payment.credit.zone.name,
-        Credito:
-          payment.credit.type === "daily"
-            ? "Diario"
-            : payment.credit.type === "biweekly"
-              ? "Quincenal"
-              : "Semanal",
-        Monto: Number(payment.amount),
-        Metodo: payment.method,
-        "Cuotas Aplicadas": payment.allocations
-          .map((allocation) => `#${allocation.installment.installmentNumber}`)
-          .join(", "),
-        Mora: payment.allocations.reduce(
+      payments.map((payment) => {
+        const ordinaryApplied = payment.allocations.reduce(
+          (total, allocation) => total + Number(allocation.amountApplied),
+          0,
+        );
+        const lateFeeApplied = payment.allocations.reduce(
           (total, allocation) => total + Number(allocation.lateFeeApplied),
           0,
-        ),
-      })),
+        );
+        return {
+          Fecha: dateLabel(payment.paymentDate),
+          "Folio Credito": payment.credit.creditNumber ? `#${payment.credit.creditNumber}` : "-",
+          Cliente: payment.client.fullName,
+          Telefono: payment.client.phone || "-",
+          Direccion: payment.client.address,
+          Zona: payment.credit.zone.name,
+          Credito:
+            payment.credit.type === "daily"
+              ? "Diario"
+              : payment.credit.type === "biweekly"
+                ? "Quincenal"
+                : "Semanal",
+          "Abonado a Cuotas": Number(ordinaryApplied.toFixed(2)),
+          "Mora Pagada": Number(lateFeeApplied.toFixed(2)),
+          "Total Pagado": Number(payment.amount),
+          Metodo: payment.method,
+          "Cuotas Aplicadas": payment.allocations
+            .map((allocation) => `#${allocation.installment.installmentNumber}`)
+            .join(", "),
+        };
+      }),
     );
 
     return workbookResponse(workbook, `pagos-${dateLabel(from)}-${dateLabel(to)}.xlsx`);
@@ -248,18 +282,21 @@ export async function GET(request: NextRequest) {
         client: true,
         zone: true,
         installments: { orderBy: { installmentNumber: "asc" } },
-        payments: { where: { cancelledAt: null }, orderBy: { paymentDate: "desc" } },
+        payments: {
+          where: { cancelledAt: null },
+          include: { allocations: true },
+          orderBy: { paymentDate: "desc" },
+        },
       },
       orderBy: [{ zone: { name: "asc" } }, { creditNumber: "asc" }],
     });
 
     const allRows = activeCredits.map((credit) => buildDetailedCreditRow(credit, today));
-    const overdueRows = allRows.filter((row) => row["Pagos Atrasados (Cuotas)"] > 0);
+    const overdueRows = allRows.filter((row) => row["Pagos Atrasados"] > 0);
 
     addSheet(workbook, "Creditos Activos (Todos)", allRows);
     addSheet(workbook, "Activos con Atraso", overdueRows);
 
-    // Also add one sheet per zone for easy field printing
     const byZone = new Map<string, typeof allRows>();
     for (const row of allRows) {
       const z = row.Zona;
@@ -277,7 +314,8 @@ export async function GET(request: NextRequest) {
         "Creditos Con Atraso": overdueRows.length,
         "Capital Prestado Activo ($)": allRows.reduce((s, r) => s + r["Capital Prestado"], 0),
         "Total a Pagar Pactado ($)": allRows.reduce((s, r) => s + r["Total a Pagar"], 0),
-        "Total Abonado ($)": allRows.reduce((s, r) => s + r["Total Abonado ($)"], 0),
+        "Abonado a Cuotas ($)": allRows.reduce((s, r) => s + r["Abonado a Cuotas ($)"], 0),
+        "Mora Pagada Total ($)": allRows.reduce((s, r) => s + r["Mora Pagada ($)"], 0),
         "Saldo Pendiente por Recuperar ($)": allRows.reduce((s, r) => s + r["Saldo Pendiente ($)"], 0),
         "Monto Total en Atraso ($)": allRows.reduce((s, r) => s + r["Monto Atrasado"], 0),
       },
@@ -295,7 +333,11 @@ export async function GET(request: NextRequest) {
       client: true,
       zone: true,
       installments: { orderBy: { installmentNumber: "asc" } },
-      payments: { where: { cancelledAt: null }, orderBy: { paymentDate: "desc" } },
+      payments: {
+        where: { cancelledAt: null },
+        include: { allocations: true },
+        orderBy: { paymentDate: "desc" },
+      },
     },
     orderBy: [{ zone: { name: "asc" } }, { type: "asc" }, { createdAt: "desc" }],
   });
@@ -304,7 +346,7 @@ export async function GET(request: NextRequest) {
     const activeWithOverdue = credits
       .filter((credit) => ["active", "delinquent"].includes(credit.status))
       .map((credit) => buildDetailedCreditRow(credit, today))
-      .filter((row) => row["Pagos Atrasados (Cuotas)"] > 0);
+      .filter((row) => row["Pagos Atrasados"] > 0);
 
     const overdueInstallmentRows = credits.flatMap((credit) =>
       credit.installments
@@ -330,7 +372,8 @@ export async function GET(request: NextRequest) {
           "Fecha Vencimiento Cuota": dateLabel(installment.dueDate),
           "Monto Cuota": Number(installment.scheduledAmount),
           Mora: Number(installment.lateFeeAmount),
-          "Abonado a Cuota": Number(installment.paidAmount),
+          "Abonado a Cuota": Math.min(Number(installment.paidAmount), Number(installment.scheduledAmount)),
+          "Mora Pagada": Math.max(Number(installment.paidAmount) - Number(installment.scheduledAmount), 0),
           "Saldo Cuota": Math.max(
             Number(installment.scheduledAmount) +
               Number(installment.lateFeeAmount) -
@@ -363,10 +406,11 @@ export async function GET(request: NextRequest) {
         Capital: detailed["Capital Prestado"],
         "Interes pactado": detailed["Interes / Financiamiento"],
         "Interes cobrado": Number(interestCollected.toFixed(2)),
-        "Pagos Hechos (Cuotas)": detailed["Pagos Hechos (Cuotas)"],
-        "Pagos Atrasados (Cuotas)": detailed["Pagos Atrasados (Cuotas)"],
-        Pagado: detailed["Total Abonado ($)"],
-        Saldo: detailed["Saldo Pendiente ($)"],
+        "Pagos Hechos": detailed["Pagos Hechos"],
+        "Pagos Atrasados": detailed["Pagos Atrasados"],
+        "Abonado a Cuotas ($)": detailed["Abonado a Cuotas ($)"],
+        "Mora Pagada ($)": detailed["Mora Pagada ($)"],
+        "Saldo Pendiente ($)": detailed["Saldo Pendiente ($)"],
         Estatus: detailed.Estatus,
       };
     });
@@ -376,18 +420,15 @@ export async function GET(request: NextRequest) {
       {
         "Capital prestado": credits.reduce((total, credit) => total + Number(credit.principalAmount), 0),
         "Interes pactado": credits.reduce((total, credit) => total + Number(credit.interestAmount), 0),
-        "Total cobrado": credits.reduce(
-          (total, credit) =>
-            total + credit.payments.reduce((paymentTotal, payment) => paymentTotal + Number(payment.amount), 0),
-          0,
-        ),
-        "Saldo cartera": credits.reduce((total, credit) => total + balance(credit.installments), 0),
+        "Abonado a cuotas": rows.reduce((total, row) => total + row["Abonado a Cuotas ($)"], 0),
+        "Mora pagada": rows.reduce((total, row) => total + row["Mora Pagada ($)"], 0),
+        "Saldo cartera": rows.reduce((total, row) => total + row["Saldo Pendiente ($)"], 0),
       },
     ]);
     return workbookResponse(workbook, `ganancias-${dateLabel(today)}.xlsx`);
   }
 
-  // Default: "cartera" (all non-cancelled credits, plus full detail sheet)
+  // Default: "cartera"
   const allDetailedRows = credits.map((credit) => buildDetailedCreditRow(credit, today));
   addSheet(workbook, "Cartera General", allDetailedRows);
 
@@ -404,7 +445,8 @@ export async function GET(request: NextRequest) {
   addSheet(workbook, "Resumen", [
     {
       "Creditos exportados": credits.length,
-      "Saldo total": formatCurrency(credits.reduce((total, credit) => total + balance(credit.installments), 0)),
+      "Saldo total": formatCurrency(allDetailedRows.reduce((total, row) => total + row["Saldo Pendiente ($)"], 0)),
+      "Mora pagada total": formatCurrency(allDetailedRows.reduce((total, row) => total + row["Mora Pagada ($)"], 0)),
       Fecha: dateLabel(today),
     },
   ]);
