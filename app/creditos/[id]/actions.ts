@@ -90,7 +90,15 @@ export async function cancelLastPaymentAction(formData: FormData) {
       credit: true,
       allocations: {
         include: {
-          installment: true,
+          installment: {
+            include: {
+              allocations: {
+                include: {
+                  payment: true,
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -113,9 +121,17 @@ export async function cancelLastPaymentAction(formData: FormData) {
   ];
 
   for (const allocation of payment.allocations) {
-    const totalApplied = Number(allocation.amountApplied) + Number(allocation.lateFeeApplied);
-    const newPaidAmount = Math.max(Number(allocation.installment.paidAmount) - totalApplied, 0);
-    const newStatus = newPaidAmount <= 0 ? "pending" : "partial";
+    const remainingActiveAllocations = allocation.installment.allocations.filter(
+      (item) => item.paymentId !== payment.id && item.payment.cancelledAt === null,
+    );
+    const recomputedPaidAmount = remainingActiveAllocations.reduce(
+      (sum, item) => sum + Number(item.amountApplied) + Number(item.lateFeeApplied),
+      0,
+    );
+    const newPaidAmount = Math.max(recomputedPaidAmount, 0);
+    const scheduled = Number(allocation.installment.scheduledAmount);
+    const newStatus =
+      newPaidAmount <= 0.01 ? "pending" : newPaidAmount + 0.01 >= scheduled ? "paid" : "partial";
 
     operations.push(
       prisma.creditInstallment.update({
@@ -123,16 +139,14 @@ export async function cancelLastPaymentAction(formData: FormData) {
         data: {
           paidAmount: newPaidAmount.toFixed(2),
           status: newStatus,
-          paidAt: null,
+          paidAt: newStatus === "paid" ? allocation.installment.paidAt : null,
         },
       }),
       prisma.collectionItem.updateMany({
         where: { installmentId: allocation.installmentId },
         data: {
-          collectedAmount: {
-            decrement: totalApplied,
-          },
-          status: newPaidAmount <= 0 ? "pending" : "partial",
+          collectedAmount: newPaidAmount.toFixed(2),
+          status: newStatus,
         },
       }),
     );
@@ -156,6 +170,138 @@ export async function cancelLastPaymentAction(formData: FormData) {
   revalidatePath(`/creditos/${creditId}`);
   revalidatePath("/creditos");
   revalidatePath("/cobros");
+  revalidatePath("/reportes");
+}
+
+export async function settleCreditAction(formData: FormData) {
+  const creditId = cleanText(formData.get("creditId"));
+  const rawAmount = cleanText(formData.get("settlementAmount")).replace(/,/g, "");
+  const settlementAmount = Math.round(Number(rawAmount));
+  const rawDate = cleanText(formData.get("paymentDate"));
+  const methodRaw = cleanText(formData.get("method"));
+  const method = (["cash", "transfer", "other"].includes(methodRaw) ? methodRaw : "cash") as
+    | "cash"
+    | "transfer"
+    | "other";
+
+  if (!creditId) {
+    throw new Error("Credito invalido.");
+  }
+
+  if (!Number.isFinite(settlementAmount) || settlementAmount < 0) {
+    throw new Error("El monto de liquidacion no es valido.");
+  }
+
+  const paymentDate = rawDate ? new Date(`${rawDate}T00:00:00.000Z`) : new Date();
+
+  const credit = await prisma.credit.findUnique({
+    where: { id: creditId },
+    include: {
+      installments: {
+        where: {
+          status: { in: ["pending", "partial", "overdue"] },
+        },
+        orderBy: { installmentNumber: "asc" },
+      },
+    },
+  });
+
+  if (!credit) {
+    throw new Error("El credito no existe.");
+  }
+
+  if (credit.status === "settled" || credit.status === "cancelled") {
+    redirect(`/creditos/${creditId}`);
+  }
+
+  const now = new Date();
+  let remainingCents = Math.round(settlementAmount * 100);
+  const allocations: Array<{
+    installmentId: string;
+    amountApplied: string;
+    lateFeeApplied: string;
+  }> = [];
+  const operations: Prisma.PrismaPromise<unknown>[] = [];
+
+  for (const installment of credit.installments) {
+    const scheduledCents = Math.round(Number(installment.scheduledAmount) * 100);
+    const paidCents = Math.round(Number(installment.paidAmount) * 100);
+    const ordinaryPendingCents = Math.max(scheduledCents - paidCents, 0);
+    const appliedOrdinaryCents = Math.min(remainingCents, ordinaryPendingCents);
+    remainingCents = Math.max(remainingCents - appliedOrdinaryCents, 0);
+
+    allocations.push({
+      installmentId: installment.id,
+      amountApplied: (appliedOrdinaryCents / 100).toFixed(2),
+      lateFeeApplied: "0.00",
+    });
+
+    operations.push(
+      prisma.creditInstallment.update({
+        where: { id: installment.id },
+        data: {
+          paidAmount: installment.scheduledAmount,
+          lateFeeAmount: "0.00",
+          status: "paid",
+          paidAt: now,
+        },
+      }),
+      prisma.collectionItem.updateMany({
+        where: { installmentId: installment.id },
+        data: {
+          collectedAmount: installment.scheduledAmount,
+          status: "paid",
+          notes: "Liquidado",
+        },
+      }),
+    );
+  }
+
+  // Si sobro algo por mora o cargo de liquidacion, sumarlo a la ultima cuota
+  if (remainingCents > 0 && allocations.length > 0) {
+    const lastAlloc = allocations[allocations.length - 1];
+    const currentApplied = Math.round(Number(lastAlloc.amountApplied) * 100);
+    lastAlloc.amountApplied = ((currentApplied + remainingCents) / 100).toFixed(2);
+  }
+
+  const paymentCreate = prisma.payment.create({
+    data: {
+      clientId: credit.clientId,
+      creditId: credit.id,
+      paymentDate,
+      amount: settlementAmount.toFixed(2),
+      method,
+      notes: "Liquidacion total del prestamo",
+      allocations: {
+        create: allocations,
+      },
+    },
+  });
+
+  operations.unshift(paymentCreate);
+  operations.push(
+    prisma.credit.update({
+      where: { id: credit.id },
+      data: {
+        status: "settled",
+        settledAt: now,
+      },
+    }),
+  );
+
+  const [createdPayment] = await prisma.$transaction(operations);
+  await refreshClientStatus(credit.clientId);
+
+  revalidatePath(`/creditos/${creditId}`);
+  revalidatePath("/creditos");
+  revalidatePath("/clientes");
+  revalidatePath("/cobros");
+  revalidatePath("/atrasadas");
+  revalidatePath("/reportes");
+  revalidatePath("/");
+
+  const paymentId = (createdPayment as { id: string }).id;
+  redirect(`/creditos/${creditId}?pago=${paymentId}`);
 }
 
 function getDailyDueDate(startDate: Date, index: number) {

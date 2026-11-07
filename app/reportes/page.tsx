@@ -1,4 +1,4 @@
-import { Download, Eye, FileSpreadsheet, Filter } from "lucide-react";
+import { CalendarDays, Download, Eye, FileSpreadsheet, Filter, RefreshCw, Users } from "lucide-react";
 import Link from "next/link";
 import { AppBar } from "@/components/mobile/app-bar";
 import { todayInMexicoAsUtcDate, todayInputValueInMexico } from "@/lib/dates";
@@ -41,6 +41,13 @@ const reports = [
     highlight: true,
   },
   {
+    title: "Reporte de renovaciones (Por dia y por usuario)",
+    detail:
+      "Cuanto dinero se renovo cada dia, apartado por usuario/cliente y por operador, con folios anteriores y nuevos.",
+    href: "/reportes/exportar?tipo=renovaciones",
+    highlight: true,
+  },
+  {
     title: "Cartera completa (Activos + Liquidados)",
     detail: "Historial general de todos los prestamos por zona y frecuencia con todos sus indicadores.",
     href: "/reportes/exportar?tipo=cartera",
@@ -72,7 +79,7 @@ export default async function ReportsPage({
   const selectedZone = searchParams?.zona ?? "all";
   const selectedFilter = searchParams?.filtro ?? "todos"; // "todos" | "atrasados" | "corriente"
 
-  const [activeCredits, zones] = await Promise.all([
+  const [activeCredits, allClientCredits, zones, defaultProfile] = await Promise.all([
     prisma.credit.findMany({
       where: {
         status: { in: ["active", "delinquent"] },
@@ -90,16 +97,34 @@ export default async function ReportsPage({
       },
       orderBy: [{ zone: { name: "asc" } }, { creditNumber: "asc" }],
     }),
+    prisma.credit.findMany({
+      where: {
+        status: { not: "cancelled" },
+        ...(selectedZone !== "all" ? { zoneId: selectedZone } : {}),
+      },
+      include: {
+        client: true,
+        zone: true,
+        creator: true,
+        renewedFrom: true,
+      },
+      orderBy: [{ startDate: "asc" }, { creditNumber: "asc" }, { createdAt: "asc" }],
+    }),
     prisma.zone.findMany({
       where: { isActive: true },
       orderBy: { name: "asc" },
     }),
+    prisma.profile.findFirst({
+      orderBy: { createdAt: "asc" },
+    }),
   ]);
 
   const enrichedCredits = activeCredits.map((credit) => {
-    const ordinaryPaid = credit.installments.reduce(
-      (sum, inst) => sum + Math.min(Number(inst.paidAmount), Number(inst.scheduledAmount)),
-      0,
+    const ordinaryPaid = Math.round(
+      credit.installments.reduce(
+        (sum, inst) => sum + Math.min(Number(inst.paidAmount), Number(inst.scheduledAmount)),
+        0,
+      ),
     );
     const lateFeePaidFromInstallments = credit.installments.reduce(
       (sum, inst) => sum + Math.max(Number(inst.paidAmount) - Number(inst.scheduledAmount), 0),
@@ -110,12 +135,11 @@ export default async function ReportsPage({
         sum + p.allocations.reduce((aSum, alloc) => aSum + Number(alloc.lateFeeApplied), 0),
       0,
     );
-    const moraPagada = Math.max(lateFeePaidFromInstallments, lateFeePaidFromAllocations);
+    const moraPagada = Math.round(Math.max(lateFeePaidFromInstallments, lateFeePaidFromAllocations));
 
-    const totalAmount = Number(credit.totalAmount);
+    const totalAmount = Math.round(Number(credit.totalAmount));
     const pendingSaldo = Math.max(totalAmount - ordinaryPaid, 0);
     const installmentAmt = Number(credit.installmentAmount) || 1;
-    // Closed whole payments (excluding late fees)
     const closedPaidCount = Math.min(
       Math.round(ordinaryPaid / installmentAmt),
       credit.installmentCount,
@@ -128,7 +152,7 @@ export default async function ReportsPage({
         Number(inst.scheduledAmount) - Math.min(Number(inst.paidAmount), Number(inst.scheduledAmount)) > 0.01,
     );
     const overdueCount = overdueInstallments.length;
-    const overdueAmount = balance(overdueInstallments);
+    const overdueAmount = Math.round(balance(overdueInstallments));
     const lastPayment = credit.payments[0];
 
     return {
@@ -150,13 +174,182 @@ export default async function ReportsPage({
   });
 
   const totalActiveCapital = filteredCredits.reduce(
-    (s, item) => s + Number(item.credit.principalAmount),
+    (s, item) => s + Math.round(Number(item.credit.principalAmount)),
     0,
   );
   const totalOrdinaryPaidSum = filteredCredits.reduce((s, item) => s + item.ordinaryPaid, 0);
   const totalMoraPaidSum = filteredCredits.reduce((s, item) => s + item.moraPagada, 0);
   const totalPendingSum = filteredCredits.reduce((s, item) => s + item.pendingSaldo, 0);
   const totalOverdueCredits = filteredCredits.filter((item) => item.overdueCount > 0).length;
+
+  // Construir reporte de renovaciones (creditos con renewedFromCreditId o 2do+ credito del mismo cliente)
+  const creditsByClient = new Map<string, typeof allClientCredits>();
+  for (const c of allClientCredits) {
+    const list = creditsByClient.get(c.clientId) ?? [];
+    list.push(c);
+    creditsByClient.set(c.clientId, list);
+  }
+
+  type RenewalItem = {
+    credit: (typeof allClientCredits)[number];
+    previousCredit: (typeof allClientCredits)[number] | typeof allClientCredits[number]["renewedFrom"];
+    dateKey: string;
+    principalRenewed: number;
+    totalRenewed: number;
+    operatorName: string;
+  };
+
+  const renewalItems: RenewalItem[] = [];
+  for (const [, clientCredits] of Array.from(creditsByClient.entries())) {
+    clientCredits.forEach((credit, idx) => {
+      const isRenewal = Boolean(credit.renewedFromCreditId) || idx > 0;
+      if (!isRenewal) return;
+
+      const previousCredit = credit.renewedFrom ?? (idx > 0 ? clientCredits[idx - 1] : null);
+      const dateKey = new Date(credit.startDate).toISOString().slice(0, 10);
+      const operatorName =
+        credit.creator?.fullName || defaultProfile?.fullName || "Operador principal";
+
+      renewalItems.push({
+        credit,
+        previousCredit,
+        dateKey,
+        principalRenewed: Math.round(Number(credit.principalAmount)),
+        totalRenewed: Math.round(Number(credit.totalAmount)),
+        operatorName,
+      });
+    });
+  }
+
+  renewalItems.sort(
+    (a, b) => new Date(b.credit.startDate).getTime() - new Date(a.credit.startDate).getTime(),
+  );
+
+  // Agrupar renovaciones por dia ("cada dia cuanto renovo en dinero")
+  const renewalsByDayMap = new Map<
+    string,
+    {
+      dateKey: string;
+      date: Date;
+      count: number;
+      principalSum: number;
+      totalSum: number;
+      clients: string[];
+    }
+  >();
+
+  for (const item of renewalItems) {
+    const existing = renewalsByDayMap.get(item.dateKey);
+    if (existing) {
+      existing.count += 1;
+      existing.principalSum += item.principalRenewed;
+      existing.totalSum += item.totalRenewed;
+      if (!existing.clients.includes(item.credit.client.fullName)) {
+        existing.clients.push(item.credit.client.fullName);
+      }
+    } else {
+      renewalsByDayMap.set(item.dateKey, {
+        dateKey: item.dateKey,
+        date: item.credit.startDate,
+        count: 1,
+        principalSum: item.principalRenewed,
+        totalSum: item.totalRenewed,
+        clients: [item.credit.client.fullName],
+      });
+    }
+  }
+  const renewalsByDay = Array.from(renewalsByDayMap.values()).sort((a, b) =>
+    b.dateKey.localeCompare(a.dateKey),
+  );
+
+  // Agrupar renovaciones por usuario/cliente ("y por usuario un apartado mas")
+  const renewalsByUserMap = new Map<
+    string,
+    {
+      clientId: string;
+      clientName: string;
+      phone: string;
+      zoneName: string;
+      operatorName: string;
+      renewalCount: number;
+      principalSum: number;
+      totalSum: number;
+      lastRenewalDate: Date;
+      latestCreditId: string;
+      folios: string[];
+    }
+  >();
+
+  for (const item of renewalItems) {
+    const key = item.credit.clientId;
+    const prevFolio = item.previousCredit?.creditNumber
+      ? `#${item.previousCredit.creditNumber}`
+      : "Previo";
+    const newFolio = item.credit.creditNumber ? `#${item.credit.creditNumber}` : "-";
+    const folioPair = `${prevFolio} → ${newFolio} (${formatCurrency(item.principalRenewed)})`;
+
+    const existing = renewalsByUserMap.get(key);
+    if (existing) {
+      existing.renewalCount += 1;
+      existing.principalSum += item.principalRenewed;
+      existing.totalSum += item.totalRenewed;
+      if (new Date(item.credit.startDate).getTime() > new Date(existing.lastRenewalDate).getTime()) {
+        existing.lastRenewalDate = item.credit.startDate;
+        existing.latestCreditId = item.credit.id;
+      }
+      existing.folios.push(folioPair);
+    } else {
+      renewalsByUserMap.set(key, {
+        clientId: item.credit.clientId,
+        clientName: item.credit.client.fullName,
+        phone: item.credit.client.phone || "Sin tel",
+        zoneName: item.credit.zone.name,
+        operatorName: item.operatorName,
+        renewalCount: 1,
+        principalSum: item.principalRenewed,
+        totalSum: item.totalRenewed,
+        lastRenewalDate: item.credit.startDate,
+        latestCreditId: item.credit.id,
+        folios: [folioPair],
+      });
+    }
+  }
+  const renewalsByUser = Array.from(renewalsByUserMap.values()).sort(
+    (a, b) => new Date(b.lastRenewalDate).getTime() - new Date(a.lastRenewalDate).getTime(),
+  );
+
+  // Agrupar por Operador / Zona
+  const renewalsByOperatorMap = new Map<
+    string,
+    {
+      operatorName: string;
+      zoneName: string;
+      count: number;
+      principalSum: number;
+      totalSum: number;
+    }
+  >();
+  for (const item of renewalItems) {
+    const key = `${item.operatorName}__${item.credit.zone.name}`;
+    const existing = renewalsByOperatorMap.get(key);
+    if (existing) {
+      existing.count += 1;
+      existing.principalSum += item.principalRenewed;
+      existing.totalSum += item.totalRenewed;
+    } else {
+      renewalsByOperatorMap.set(key, {
+        operatorName: item.operatorName,
+        zoneName: item.credit.zone.name,
+        count: 1,
+        principalSum: item.principalRenewed,
+        totalSum: item.totalRenewed,
+      });
+    }
+  }
+  const renewalsByOperator = Array.from(renewalsByOperatorMap.values());
+
+  const totalRenewedCapital = renewalItems.reduce((s, item) => s + item.principalRenewed, 0);
+  const totalRenewedWithInterest = renewalItems.reduce((s, item) => s + item.totalRenewed, 0);
 
   return (
     <main className="min-h-screen bg-field pb-24">
@@ -168,28 +361,37 @@ export default async function ReportsPage({
             <div>
               <div className="flex items-center gap-2.5">
                 <FileSpreadsheet size={30} className="text-maize" aria-hidden />
-                <h1 className="text-2xl font-extrabold">Reportes de Creditos Activos y Exportacion</h1>
+                <h1 className="text-2xl font-extrabold">Reportes de Creditos, Renovaciones y Exportacion</h1>
               </div>
               <p className="mt-2 text-sm leading-6 text-white/75">
-                Consulta en pantalla o descarga en Excel todos los datos de los creditos activos (incluyendo los atrasados): fecha de otorgamiento, pagos hechos cerrados, mora pagada en columna aparte, pagos atrasados, abonado y saldo.
+                Consulta en pantalla o descarga en Excel los creditos activos (sin decimales y con mora separada) y el reporte completo de renovaciones por dia y por usuario.
               </p>
             </div>
-            <a
-              href={`/reportes/exportar?tipo=activos&zona=${selectedZone}`}
-              className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-md bg-maize px-5 py-3 text-sm font-extrabold text-ink shadow-soft transition hover:bg-mint"
-            >
-              <Download size={18} aria-hidden />
-              Descargar Creditos Activos (.xlsx)
-            </a>
+            <div className="flex flex-wrap gap-2">
+              <a
+                href={`/reportes/exportar?tipo=activos&zona=${selectedZone}`}
+                className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-md bg-maize px-4 py-2.5 text-xs font-extrabold text-ink shadow-soft transition hover:bg-mint"
+              >
+                <Download size={16} aria-hidden />
+                Creditos Activos (.xlsx)
+              </a>
+              <a
+                href={`/reportes/exportar?tipo=renovaciones&zona=${selectedZone}`}
+                className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-md bg-mint px-4 py-2.5 text-xs font-extrabold text-ink shadow-soft transition hover:bg-maize"
+              >
+                <Download size={16} aria-hidden />
+                Renovaciones (.xlsx)
+              </a>
+            </div>
           </div>
 
-          <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-5">
+          <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-6">
             <div className="rounded-md bg-white/10 p-3">
               <p className="text-xs font-semibold text-white/70">Creditos activos</p>
               <p className="mt-1 text-xl font-black">
                 {filteredCredits.length}{" "}
                 <span className="text-xs font-normal text-white/75">
-                  ({totalOverdueCredits} con atraso)
+                  ({totalOverdueCredits} atraso)
                 </span>
               </p>
             </div>
@@ -209,12 +411,16 @@ export default async function ReportsPage({
               <p className="text-xs font-semibold text-white/70">Saldo por recuperar</p>
               <p className="mt-1 text-xl font-black text-maize">{formatCurrency(totalPendingSum)}</p>
             </div>
+            <div className="rounded-md bg-white/10 p-3">
+              <p className="text-xs font-semibold text-white/70">Dinero renovado</p>
+              <p className="mt-1 text-xl font-black text-mint">{formatCurrency(totalRenewedCapital)}</p>
+            </div>
           </div>
         </div>
       </section>
 
       {/* Descargas rapidas a Excel */}
-      <section className="mx-auto grid max-w-6xl gap-3 px-4 sm:grid-cols-2">
+      <section className="mx-auto grid max-w-6xl gap-3 px-4 sm:grid-cols-2 lg:grid-cols-3">
         {reports.map((report) => (
           <a
             key={report.href}
@@ -234,6 +440,200 @@ export default async function ReportsPage({
             </div>
           </a>
         ))}
+      </section>
+
+      {/* REPORTE DE RENOVACIONES: POR DIA Y POR USUARIO */}
+      <section id="renovaciones" className="mx-auto mt-6 max-w-6xl px-4">
+        <div className="rounded-md border border-line bg-white p-4 shadow-soft sm:p-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <RefreshCw size={20} className="text-moss" aria-hidden />
+                <h2 className="text-xl font-black text-ink">
+                  Reporte de Renovaciones ({renewalItems.length})
+                </h2>
+              </div>
+              <p className="mt-0.5 text-xs font-semibold text-stone-500">
+                Desglose de cuanto dinero se renovo cada dia y apartado especial por usuario/cliente y operador.
+              </p>
+            </div>
+            <a
+              href={`/reportes/exportar?tipo=renovaciones&zona=${selectedZone}`}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-ink px-4 py-2 text-xs font-extrabold text-white transition hover:bg-moss"
+            >
+              <Download size={15} aria-hidden />
+              Descargar Reporte de Renovaciones (.xlsx)
+            </a>
+          </div>
+
+          {/* Resumen rapido de renovaciones */}
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="rounded-md bg-field p-3">
+              <p className="text-xs font-bold uppercase text-stone-500">Total renovaciones</p>
+              <p className="mt-1 text-2xl font-black text-ink">{renewalItems.length}</p>
+            </div>
+            <div className="rounded-md bg-field p-3">
+              <p className="text-xs font-bold uppercase text-stone-500">Dinero renovado (Capital)</p>
+              <p className="mt-1 text-2xl font-black text-moss">{formatCurrency(totalRenewedCapital)}</p>
+            </div>
+            <div className="rounded-md bg-field p-3">
+              <p className="text-xs font-bold uppercase text-stone-500">Total renovado con interes</p>
+              <p className="mt-1 text-2xl font-black text-ink">{formatCurrency(totalRenewedWithInterest)}</p>
+            </div>
+            <div className="rounded-md bg-field p-3">
+              <p className="text-xs font-bold uppercase text-stone-500">Usuarios que renovaron</p>
+              <p className="mt-1 text-2xl font-black text-ink">{renewalsByUser.length}</p>
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-6 lg:grid-cols-2">
+            {/* Apartado 1: Cada dia cuanto renovo en dinero */}
+            <div className="rounded-md border border-line bg-field/40 p-4">
+              <div className="flex items-center gap-2">
+                <CalendarDays size={18} className="text-moss" aria-hidden />
+                <h3 className="text-base font-black text-ink">
+                  Renovaciones por Dia (Dinero renovado cada dia)
+                </h3>
+              </div>
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full border-collapse text-left text-xs">
+                  <thead>
+                    <tr className="border-b-2 border-line bg-field text-[11px] font-black uppercase text-stone-600">
+                      <th className="px-3 py-2.5">Fecha</th>
+                      <th className="px-3 py-2.5">Renovaciones</th>
+                      <th className="px-3 py-2.5">Dinero Renovado</th>
+                      <th className="px-3 py-2.5">Total c/ Interes</th>
+                      <th className="px-3 py-2.5">Usuarios</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-line bg-white">
+                    {renewalsByDay.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="px-3 py-6 text-center text-stone-500">
+                          No hay renovaciones registradas.
+                        </td>
+                      </tr>
+                    ) : (
+                      renewalsByDay.map((day) => (
+                        <tr key={day.dateKey} className="hover:bg-field/50">
+                          <td className="px-3 py-2.5 font-extrabold text-ink">
+                            {formatDate(day.date)}
+                          </td>
+                          <td className="px-3 py-2.5 font-bold text-ink">{day.count}</td>
+                          <td className="px-3 py-2.5 font-extrabold text-moss">
+                            {formatCurrency(day.principalSum)}
+                          </td>
+                          <td className="px-3 py-2.5 font-bold text-ink">
+                            {formatCurrency(day.totalSum)}
+                          </td>
+                          <td className="px-3 py-2.5 text-[11px] text-stone-600">
+                            {day.clients.join(", ")}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Apartado 2: Por Usuario / Operador y Cliente */}
+            <div className="rounded-md border border-line bg-field/40 p-4">
+              <div className="flex items-center gap-2">
+                <Users size={18} className="text-moss" aria-hidden />
+                <h3 className="text-base font-black text-ink">
+                  Apartado por Usuario (Operador y Clientes)
+                </h3>
+              </div>
+
+              {/* Resumen por Operador / Usuario del sistema */}
+              {renewalsByOperator.length > 0 ? (
+                <div className="mt-3 mb-4 rounded-md border border-line bg-white p-3">
+                  <p className="text-[11px] font-black uppercase tracking-wider text-stone-500">
+                    Total renovado por Usuario Operador / Zona
+                  </p>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    {renewalsByOperator.map((op) => (
+                      <div
+                        key={`${op.operatorName}-${op.zoneName}`}
+                        className="flex items-center justify-between rounded-md bg-field px-3 py-2 text-xs"
+                      >
+                        <div>
+                          <p className="font-extrabold text-ink">{op.operatorName}</p>
+                          <p className="text-[11px] text-stone-500">
+                            Zona {op.zoneName} · {op.count} renovaciones
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-black text-moss">{formatCurrency(op.principalSum)}</p>
+                          <p className="text-[10px] text-stone-500">
+                            Total: {formatCurrency(op.totalSum)}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Desglose por Usuario / Cliente que renovo */}
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-left text-xs">
+                  <thead>
+                    <tr className="border-b-2 border-line bg-field text-[11px] font-black uppercase text-stone-600">
+                      <th className="px-3 py-2.5">Usuario / Cliente</th>
+                      <th className="px-3 py-2.5">Veces</th>
+                      <th className="px-3 py-2.5">Dinero Renovado</th>
+                      <th className="px-3 py-2.5">Ultima Fecha</th>
+                      <th className="px-3 py-2.5 text-right">Prestamo</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-line bg-white">
+                    {renewalsByUser.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="px-3 py-6 text-center text-stone-500">
+                          No hay usuarios con renovaciones.
+                        </td>
+                      </tr>
+                    ) : (
+                      renewalsByUser.map((u) => (
+                        <tr key={u.clientId} className="hover:bg-field/50">
+                          <td className="px-3 py-2.5">
+                            <p className="font-extrabold text-ink">{u.clientName}</p>
+                            <p className="text-[11px] text-stone-500">
+                              {u.zoneName} · {u.folios.join(" | ")}
+                            </p>
+                          </td>
+                          <td className="px-3 py-2.5 font-extrabold text-ink">{u.renewalCount}</td>
+                          <td className="px-3 py-2.5">
+                            <p className="font-extrabold text-moss">
+                              {formatCurrency(u.principalSum)}
+                            </p>
+                            <p className="text-[10px] text-stone-500">
+                              Total: {formatCurrency(u.totalSum)}
+                            </p>
+                          </td>
+                          <td className="px-3 py-2.5 font-bold text-ink">
+                            {formatDate(u.lastRenewalDate)}
+                          </td>
+                          <td className="px-3 py-2.5 text-right">
+                            <Link
+                              href={`/creditos/${u.latestCreditId}`}
+                              className="inline-flex min-h-7 items-center gap-1 rounded-md border border-line bg-white px-2 py-1 text-[11px] font-bold text-ink hover:border-moss"
+                            >
+                              <Eye size={12} aria-hidden />
+                              Ver
+                            </Link>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
 
       {/* Reporte en vivo de todos los creditos activos (incluyendo atrasados) */}
@@ -446,3 +846,4 @@ export default async function ReportsPage({
     </main>
   );
 }
+

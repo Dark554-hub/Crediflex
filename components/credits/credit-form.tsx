@@ -33,7 +33,9 @@ function moneyPreview(amount: number) {
   return new Intl.NumberFormat("es-MX", {
     style: "currency",
     currency: "MXN",
-  }).format(Number.isFinite(amount) ? amount : 0);
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(amount) ? Math.round(amount) : 0);
 }
 
 const weekDays = [
@@ -52,7 +54,7 @@ export function CreditForm({ clients, zones, renewalCredit }: CreditFormProps) {
   const [principal, setPrincipal] = useState("");
   const [installments, setInstallments] = useState("");
   const [rate, setRate] = useState(
-    renewalCredit ? (Number(renewalCredit.interestRate) * 100).toString() : "",
+    renewalCredit ? Math.round(Number(renewalCredit.interestRate) * 100).toString() : "",
   );
   const [type, setType] = useState<"daily" | "weekly" | "biweekly">(renewalCredit?.type ?? "daily");
   const [productType, setProductType] = useState<"standard" | "express">(
@@ -282,7 +284,7 @@ export function CreditForm({ clients, zones, renewalCredit }: CreditFormProps) {
           <span className="text-sm font-semibold text-ink">Cargo fijo por mora</span>
           <input
             name="lateFeeAmount"
-            defaultValue={renewalCredit?.lateFeeAmount.toString() ?? "0"}
+            defaultValue={renewalCredit ? Math.round(Number(renewalCredit.lateFeeAmount)).toString() : "0"}
             inputMode="decimal"
             className="min-h-12 w-full rounded-md border border-line bg-white px-4 text-base outline-none transition focus:border-moss focus:ring-4 focus:ring-moss/10"
           />
@@ -292,7 +294,7 @@ export function CreditForm({ clients, zones, renewalCredit }: CreditFormProps) {
           <span className="text-sm font-semibold text-ink">Tasa de mora</span>
           <input
             name="lateFeeRatePercent"
-            defaultValue={renewalCredit ? (Number(renewalCredit.lateFeeRate) * 100).toString() : "0"}
+            defaultValue={renewalCredit ? Math.round(Number(renewalCredit.lateFeeRate) * 100).toString() : "0"}
             inputMode="decimal"
             className="min-h-12 w-full rounded-md border border-line bg-white px-4 text-base outline-none transition focus:border-moss focus:ring-4 focus:ring-moss/10"
             placeholder="Porcentaje"

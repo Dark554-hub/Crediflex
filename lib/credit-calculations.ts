@@ -27,7 +27,7 @@ export type AmortizationResult = {
 };
 
 function roundCurrency(amount: number) {
-  return Math.round(amount * 100) / 100;
+  return Math.round(amount);
 }
 
 function addDays(date: Date, days: number) {
@@ -61,30 +61,18 @@ export function buildAmortizationSchedule(input: AmortizationInput): Amortizatio
     return buildExpressAmortizationSchedule(input);
   }
 
-  const principalCents = Math.round(input.principalAmount * 100);
+  const principalWhole = Math.round(input.principalAmount);
+  const interestWhole = Math.round(principalWhole * input.interestRate);
+  const totalWhole = principalWhole + interestWhole;
 
-  // Interes fijo simple:
-  // interest_amount = principal_amount * interest_rate.
-  // Ejemplo conceptual: una tasa 0.20 representa 20% sobre el capital completo del credito.
-  const interestCents = Math.round(input.principalAmount * input.interestRate * 100);
-
-  // Total a pagar del credito:
-  // total_amount = principal_amount + interest_amount.
-  const totalCents = principalCents + interestCents;
-
-  // La cuota base se reparte en centavos para evitar errores de punto flotante.
-  // Los sobrantes de redondeo se agregan a las ultimas cuotas para que la suma exacta cierre.
-  const basePrincipalCents = Math.floor(principalCents / input.installmentCount);
-  const principalRemainder = principalCents % input.installmentCount;
-  const baseInterestCents = Math.floor(interestCents / input.installmentCount);
-  const interestRemainder = interestCents % input.installmentCount;
+  const basePrincipal = Math.floor(principalWhole / input.installmentCount);
+  const principalRemainder = principalWhole % input.installmentCount;
+  const baseInterest = Math.floor(interestWhole / input.installmentCount);
+  const interestRemainder = interestWhole % input.installmentCount;
 
   const installments = Array.from({ length: input.installmentCount }, (_, index) => {
     const installmentNumber = index + 1;
 
-    // Fecha esperada:
-    // credito diario => startDate omitiendo domingos.
-    // credito semanal => startDate + (index * 7) dias.
     const dueDate =
       input.type === "daily"
         ? getDailyDueDate(input.startDate, index)
@@ -92,69 +80,61 @@ export function buildAmortizationSchedule(input: AmortizationInput): Amortizatio
           ? addDays(input.startDate, index * 15)
           : getWeeklyDueDate(input.startDate, input.weeklyCollectionDay ?? input.startDate.getUTCDay(), index);
 
-    const principalComponentCents =
-      basePrincipalCents + (index >= input.installmentCount - principalRemainder ? 1 : 0);
-    const interestComponentCents =
-      baseInterestCents + (index >= input.installmentCount - interestRemainder ? 1 : 0);
+    const principalComponent =
+      basePrincipal + (index >= input.installmentCount - principalRemainder ? 1 : 0);
+    const interestComponent =
+      baseInterest + (index >= input.installmentCount - interestRemainder ? 1 : 0);
 
     return {
       installmentNumber,
       dueDate,
-      principalComponent: principalComponentCents / 100,
-      interestComponent: interestComponentCents / 100,
-      // Monto programado:
-      // scheduled_amount = principal_component + interest_component.
-      scheduledAmount: (principalComponentCents + interestComponentCents) / 100,
+      principalComponent,
+      interestComponent,
+      scheduledAmount: principalComponent + interestComponent,
     };
   });
 
   const expectedEndDate = installments[installments.length - 1]?.dueDate ?? input.startDate;
 
   return {
-    interestAmount: interestCents / 100,
-    totalAmount: totalCents / 100,
-    installmentAmount: roundCurrency(totalCents / 100 / input.installmentCount),
+    interestAmount: interestWhole,
+    totalAmount: totalWhole,
+    installmentAmount: roundCurrency(totalWhole / input.installmentCount),
     expectedEndDate,
     installments,
   };
 }
 
 function buildExpressAmortizationSchedule(input: AmortizationInput): AmortizationResult {
-  const principalCents = Math.round(input.principalAmount * 100);
+  const principalWhole = Math.round(input.principalAmount);
+  const weeklyInterestWhole = Math.round(principalWhole * 0.05);
 
-  // Credito express:
-  // tasa semanal fija = 5% sobre el capital original.
-  // interes_semanal = principal_amount * 0.05.
-  const weeklyInterestCents = Math.round(input.principalAmount * 0.05 * 100);
-
-  // Plazo express:
-  // 4 pagos semanales. Los primeros 3 pagan solo interes.
-  // El cuarto pago liquida capital completo + ultimo interes semanal.
   const installmentCount = 4;
-  const interestCents = weeklyInterestCents * installmentCount;
-  const totalCents = principalCents + interestCents;
+  const interestWhole = weeklyInterestWhole * installmentCount;
+  const totalWhole = principalWhole + interestWhole;
   const weeklyCollectionDay = input.weeklyCollectionDay ?? input.startDate.getUTCDay();
 
   const installments = Array.from({ length: installmentCount }, (_, index) => {
     const installmentNumber = index + 1;
     const isFinalInstallment = installmentNumber === installmentCount;
-    const principalComponentCents = isFinalInstallment ? principalCents : 0;
-    const scheduledCents = principalComponentCents + weeklyInterestCents;
+    const principalComponent = isFinalInstallment ? principalWhole : 0;
+    const scheduledAmount = principalComponent + weeklyInterestWhole;
 
     return {
       installmentNumber,
       dueDate: getWeeklyDueDate(input.startDate, weeklyCollectionDay, installmentNumber),
-      scheduledAmount: scheduledCents / 100,
-      principalComponent: principalComponentCents / 100,
-      interestComponent: weeklyInterestCents / 100,
+      scheduledAmount,
+      principalComponent,
+      interestComponent: weeklyInterestWhole,
     };
   });
 
   return {
-    interestAmount: interestCents / 100,
-    totalAmount: totalCents / 100,
-    installmentAmount: weeklyInterestCents / 100,
+    interestAmount: interestWhole,
+    totalAmount: totalWhole,
+    installmentAmount: weeklyInterestWhole,
     expectedEndDate: installments[installments.length - 1]?.dueDate ?? input.startDate,
     installments,
   };
 }
+

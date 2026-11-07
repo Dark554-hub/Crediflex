@@ -7,6 +7,8 @@ import { useFormState, useFormStatus } from "react-dom";
 import { createPaymentAction } from "@/app/creditos/[id]/pagos/actions";
 import { Button } from "@/components/ui/button";
 import { todayInputValueInMexico } from "@/lib/dates";
+import { formatCurrency } from "@/lib/money";
+import { calculateSettlement } from "@/lib/settlement";
 
 type PaymentFormProps = {
   credit: Credit & {
@@ -22,22 +24,27 @@ const methodLabels: Record<PaymentMethod, string> = {
 const inputClass =
   "min-h-12 w-full rounded-md border border-line bg-white px-4 text-base outline-none transition focus:border-moss focus:ring-4 focus:ring-moss/10";
 
-function SubmitButton() {
+function SubmitButton({ isSettlement }: { isSettlement: boolean }) {
   const { pending } = useFormStatus();
 
   return (
     <Button type="submit" disabled={pending} className="w-full sm:w-auto">
       <Save size={18} aria-hidden />
-      {pending ? "Registrando..." : "Registrar pago"}
+      {pending
+        ? "Registrando..."
+        : isSettlement
+          ? "Liquidar prestamo"
+          : "Registrar pago"}
     </Button>
   );
 }
 
 export function PaymentForm({ credit }: PaymentFormProps) {
   const [state, formAction] = useFormState(createPaymentAction.bind(null, credit.id), {});
-  const [selectedAmount, setSelectedAmount] = useState("total");
+  const [selectedAmount, setSelectedAmount] = useState("current");
   const [otherAmount, setOtherAmount] = useState("");
   const [lateFee, setLateFee] = useState("0");
+  const [settleWithOtherAmount, setSettleWithOtherAmount] = useState(false);
   const [printReceipt, setPrintReceipt] = useState(credit.printReceiptDefault);
   const todayTime = useMemo(() => {
     const today = new Date();
@@ -46,46 +53,61 @@ export function PaymentForm({ credit }: PaymentFormProps) {
   }, []);
   const pendingBalance = useMemo(
     () =>
-      credit.installments.reduce((total, installment) => {
-        const balance =
-          Number(installment.scheduledAmount) +
-          Number(installment.lateFeeAmount) -
-          Number(installment.paidAmount);
-        return total + Math.max(balance, 0);
-      }, 0),
+      Math.round(
+        credit.installments.reduce((total, installment) => {
+          const balance =
+            Number(installment.scheduledAmount) +
+            Number(installment.lateFeeAmount) -
+            Number(installment.paidAmount);
+          return total + Math.max(balance, 0);
+        }, 0),
+      ),
     [credit.installments],
   );
   const overdueBalance = useMemo(
     () =>
-      credit.installments.reduce((total, installment) => {
-        const due = new Date(installment.dueDate);
-        const balance =
-          Number(installment.scheduledAmount) +
-          Number(installment.lateFeeAmount) -
-          Number(installment.paidAmount);
-        return due.getTime() < todayTime ? total + Math.max(balance, 0) : total;
-      }, 0),
+      Math.round(
+        credit.installments.reduce((total, installment) => {
+          const due = new Date(installment.dueDate);
+          const balance =
+            Number(installment.scheduledAmount) +
+            Number(installment.lateFeeAmount) -
+            Number(installment.paidAmount);
+          return due.getTime() < todayTime ? total + Math.max(balance, 0) : total;
+        }, 0),
+      ),
     [credit.installments, todayTime],
   );
   const currentBalance = useMemo(() => {
     const next = credit.installments[0];
     if (!next) return 0;
-    return Math.max(Number(next.scheduledAmount) + Number(next.lateFeeAmount) - Number(next.paidAmount), 0);
+    return Math.round(
+      Math.max(Number(next.scheduledAmount) + Number(next.lateFeeAmount) - Number(next.paidAmount), 0),
+    );
   }, [credit.installments]);
-  const debtTotal = Number(credit.totalAmount) - credit.installments.reduce(
-    (total, installment) => total + Number(installment.paidAmount),
-    0,
+  const debtTotal = Math.round(
+    Number(credit.totalAmount) -
+      credit.installments.reduce((total, installment) => total + Number(installment.paidAmount), 0),
   );
+  const settlementCalc = useMemo(() => calculateSettlement(credit), [credit]);
+  const settlementAmount = Math.round(settlementCalc.settlementBeforeDiscount);
+
   const options = [
     ["overdue", "Saldo Vencido", overdueBalance],
-    ["current", "Saldo Vigente", currentBalance],
+    ["current", "Saldo Vigente (Cuota)", currentBalance],
+    ["settlement", "Liquidar Prestamo (Con descuento)", settlementAmount],
     ["total", "Saldo Total", pendingBalance],
     ["debt", "Deuda Total", debtTotal],
-    ["other", "Otro Monto", Number(otherAmount.replace(/,/g, "")) || 0],
+    ["other", "Otro Monto", Math.round(Number(otherAmount.replace(/,/g, "")) || 0)],
   ] as const;
   const baseAmount = options.find(([value]) => value === selectedAmount)?.[2] ?? 0;
-  const lateFeeValue = Number(lateFee.replace(/,/g, "")) || 0;
-  const totalToPay = Math.max(baseAmount + lateFeeValue, 0);
+  const lateFeeValue = Math.round(Number(lateFee.replace(/,/g, "")) || 0);
+  const totalToPay = Math.round(Math.max(baseAmount + lateFeeValue, 0));
+  const isSettlement =
+    selectedAmount === "settlement" ||
+    selectedAmount === "total" ||
+    selectedAmount === "debt" ||
+    (selectedAmount === "other" && settleWithOtherAmount);
 
   return (
     <form action={formAction} className="space-y-5">
@@ -95,8 +117,9 @@ export function PaymentForm({ credit }: PaymentFormProps) {
         </div>
       ) : null}
 
-      <input type="hidden" name="amount" value={totalToPay.toFixed(2)} />
-      <input type="hidden" name="additionalLateFee" value={lateFeeValue.toFixed(2)} />
+      <input type="hidden" name="amount" value={String(totalToPay)} />
+      <input type="hidden" name="additionalLateFee" value={String(lateFeeValue)} />
+      <input type="hidden" name="isSettlement" value={isSettlement ? "true" : "false"} />
 
       <div className="grid gap-5">
         <div className="grid gap-3">
@@ -114,7 +137,7 @@ export function PaymentForm({ credit }: PaymentFormProps) {
                 className="h-6 w-6 accent-moss"
               />
               <span className="flex-1">{label}</span>
-              <span className="text-right text-moss">{amount.toFixed(2)}</span>
+              <span className="text-right font-extrabold text-moss">{formatCurrency(amount)}</span>
             </label>
           ))}
         </div>
@@ -127,26 +150,40 @@ export function PaymentForm({ credit }: PaymentFormProps) {
               setOtherAmount(event.target.value);
               setSelectedAmount("other");
             }}
-            inputMode="decimal"
+            inputMode="numeric"
             className={inputClass}
-            placeholder="0.00"
+            placeholder="0"
           />
         </label>
+
+        {selectedAmount === "other" ? (
+          <label className="flex min-h-12 items-center gap-3 rounded-md border border-moss/30 bg-mint/25 px-3 py-2 text-sm font-bold text-ink">
+            <input
+              type="checkbox"
+              checked={settleWithOtherAmount}
+              onChange={(event) => setSettleWithOtherAmount(event.target.checked)}
+              className="h-5 w-5 accent-moss"
+            />
+            <span>Liquidar y saldar el prestamo completo con este monto</span>
+          </label>
+        ) : null}
 
         <label className="space-y-2">
           <span className="text-sm font-semibold text-ink">Interes o mora</span>
           <input
             value={lateFee}
             onChange={(event) => setLateFee(event.target.value)}
-            inputMode="decimal"
+            inputMode="numeric"
             className={inputClass}
-            placeholder="0.00"
+            placeholder="0"
           />
         </label>
 
         <div className="flex items-center justify-between rounded-md bg-ink px-4 py-4 text-white shadow-soft">
-          <span className="text-lg font-semibold text-white/82">Total a pagar</span>
-          <span className="text-2xl font-extrabold">{totalToPay.toFixed(2)}</span>
+          <span className="text-lg font-semibold text-white/82">
+            {isSettlement ? "Total para liquidar" : "Total a pagar"}
+          </span>
+          <span className="text-2xl font-extrabold">{formatCurrency(totalToPay)}</span>
         </div>
 
         <label className="space-y-2">
@@ -184,11 +221,10 @@ export function PaymentForm({ credit }: PaymentFormProps) {
             className="h-6 w-6 accent-moss"
           />
         </label>
-
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <SubmitButton />
+        <SubmitButton isSettlement={isSettlement} />
         <Button type="button" variant="secondary" onClick={() => history.back()}>
           Cancelar
         </Button>
@@ -196,3 +232,4 @@ export function PaymentForm({ credit }: PaymentFormProps) {
     </form>
   );
 }
+

@@ -16,8 +16,12 @@ export function toDecimalString(amount: number) {
 }
 
 export function formatCurrency(amount: number | { toString(): string }) {
+  const numericAmount = Number(amount.toString());
   return new Intl.NumberFormat("es-MX", {
     style: "currency",
     currency: "MXN",
-  }).format(Number(amount.toString()));
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(numericAmount) ? Math.round(numericAmount) : 0);
 }
+

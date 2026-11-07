@@ -140,19 +140,44 @@ export async function createCreditAction(
       throw new Error("Los dias de gracia deben ser un entero mayor o igual a cero.");
     }
 
-    const client = await prisma.client.findFirst({
-      where: {
-        id: clientId,
-        deletedAt: null,
-      },
-      select: {
-        id: true,
-      },
-    });
+    const [client, defaultProfile, latestClientCredit] = await Promise.all([
+      prisma.client.findFirst({
+        where: {
+          id: clientId,
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+        },
+      }),
+      prisma.profile.findFirst({
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
+      }),
+      prisma.credit.findFirst({
+        where: {
+          clientId,
+          status: { not: "cancelled" },
+        },
+        orderBy: [{ startDate: "desc" }, { createdAt: "desc" }],
+        include: {
+          installments: true,
+        },
+      }),
+    ]);
 
     if (!client) {
       throw new Error("El cliente seleccionado no existe o esta inactivo.");
     }
+
+    const resolvedRenewedFromId = renewedFromCreditId || latestClientCredit?.id || null;
+    const renewedCreditRecord =
+      renewedFromCreditId && renewedFromCreditId !== latestClientCredit?.id
+        ? await prisma.credit.findUnique({
+            where: { id: renewedFromCreditId },
+            include: { installments: true },
+          })
+        : latestClientCredit;
 
     const schedule = buildAmortizationSchedule({
       principalAmount,
@@ -164,8 +189,46 @@ export async function createCreditAction(
       weeklyCollectionDay: resolvedWeeklyCollectionDay,
     });
 
-    const [credit] = await prisma.$transaction([
-      prisma.credit.create({
+    const createdCredit = await prisma.$transaction(async (tx) => {
+      // Si viene de una renovacion explicita y el credito anterior sigue abierto, liquidarlo
+      if (
+        renewedFromCreditId &&
+        renewedCreditRecord &&
+        ["active", "delinquent"].includes(renewedCreditRecord.status)
+      ) {
+        for (const inst of renewedCreditRecord.installments) {
+          if (inst.status !== "paid") {
+            await tx.creditInstallment.update({
+              where: { id: inst.id },
+              data: {
+                status: "paid",
+                paidAmount: inst.scheduledAmount,
+                lateFeeAmount: "0.00",
+                paidAt: new Date(),
+              },
+            });
+          }
+        }
+        await tx.collectionItem.updateMany({
+          where: {
+            creditId: renewedCreditRecord.id,
+            status: { in: ["pending", "partial", "overdue"] },
+          },
+          data: {
+            status: "paid",
+            notes: "Liquidado por renovacion de credito.",
+          },
+        });
+        await tx.credit.update({
+          where: { id: renewedCreditRecord.id },
+          data: {
+            status: "settled",
+            settledAt: new Date(),
+          },
+        });
+      }
+
+      const newCredit = await tx.credit.create({
         data: {
           clientId,
           zoneId,
@@ -182,7 +245,8 @@ export async function createCreditAction(
           lateFeeGraceDays,
           printReceiptDefault,
           weeklyCollectionDay: type === "weekly" ? resolvedWeeklyCollectionDay : null,
-          renewedFromCreditId: renewedFromCreditId || null,
+          renewedFromCreditId: resolvedRenewedFromId,
+          createdBy: defaultProfile?.id ?? null,
           startDate,
           expectedEndDate: schedule.expectedEndDate,
           installments: {
@@ -195,16 +259,19 @@ export async function createCreditAction(
             })),
           },
         },
-      }),
-      prisma.client.update({
+      });
+
+      await tx.client.update({
         where: { id: clientId },
         data: {
           status: "active",
         },
-      }),
-    ]);
+      });
 
-    creditId = credit.id;
+      return newCredit;
+    });
+
+    creditId = createdCredit.id;
   } catch (error) {
     return {
       error: error instanceof Error ? error.message : "No se pudo abrir el credito.",
@@ -213,5 +280,7 @@ export async function createCreditAction(
 
   revalidatePath("/creditos");
   revalidatePath("/clientes");
+  revalidatePath("/reportes");
   redirect(`/creditos/${creditId}`);
 }
+

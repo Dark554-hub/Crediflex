@@ -137,9 +137,9 @@ function buildDetailedCreditRow(
     0,
   );
 
-  const moraPagada = Math.max(lateFeePaidFromInstallments, lateFeePaidFromAllocations);
-  const ordinaryPaid = ordinaryPaidFromInstallments;
-  const totalAmount = Number(credit.totalAmount);
+  const moraPagada = Math.round(Math.max(lateFeePaidFromInstallments, lateFeePaidFromAllocations));
+  const ordinaryPaid = Math.round(ordinaryPaidFromInstallments);
+  const totalAmount = Math.round(Number(credit.totalAmount));
   const pendingOrdinarySaldo = Math.max(totalAmount - ordinaryPaid, 0);
 
   const installmentAmt = Number(credit.installmentAmount) || 1;
@@ -156,7 +156,7 @@ function buildDetailedCreditRow(
       Number(inst.scheduledAmount) - Math.min(Number(inst.paidAmount), Number(inst.scheduledAmount)) > 0.01,
   );
   const overdueCount = overdueInstallments.length;
-  const overdueAmount = balance(overdueInstallments);
+  const overdueAmount = Math.round(balance(overdueInstallments));
 
   const pendingInstallmentsCount = Math.max(credit.installmentCount - closedPaidInstallments, 0);
   const nextPendingInstallment = sortedInstallments.find(
@@ -183,21 +183,21 @@ function buildDetailedCreditRow(
     "Dia de Cobro": collectionDayLabel(credit.type, credit.weeklyCollectionDay, credit.startDate),
     "Fecha de Otorgamiento": dateLabel(credit.startDate),
     "Fecha de Vencimiento": dateLabel(credit.expectedEndDate),
-    "Capital Prestado": Number(credit.principalAmount),
-    "Tasa Interes (%)": Number((Number(credit.interestRate) * 100).toFixed(2)),
-    "Interes / Financiamiento": Number(credit.interestAmount),
+    "Capital Prestado": Math.round(Number(credit.principalAmount)),
+    "Tasa Interes (%)": Math.round(Number(credit.interestRate) * 100),
+    "Interes / Financiamiento": Math.round(Number(credit.interestAmount)),
     "Total a Pagar": totalAmount,
-    "Valor Cuota": Number(credit.installmentAmount),
+    "Valor Cuota": Math.round(Number(credit.installmentAmount)),
     "Total Cuotas": credit.installmentCount,
     "Pagos Hechos": closedPaidInstallments,
     "Cuotas Pendientes": pendingInstallmentsCount,
     "Pagos Atrasados": overdueCount,
-    "Monto Atrasado": Number(overdueAmount.toFixed(2)),
-    "Abonado a Cuotas ($)": Number(ordinaryPaid.toFixed(2)),
-    "Mora Pagada ($)": Number(moraPagada.toFixed(2)),
-    "Saldo Pendiente ($)": Number(pendingOrdinarySaldo.toFixed(2)),
+    "Monto Atrasado": overdueAmount,
+    "Abonado a Cuotas ($)": ordinaryPaid,
+    "Mora Pagada ($)": moraPagada,
+    "Saldo Pendiente ($)": pendingOrdinarySaldo,
     "Fecha Ultimo Pago": lastPayment ? dateLabel(lastPayment.paymentDate) : "Sin pagos",
-    "Monto Ultimo Pago": lastPayment ? Number(lastPayment.amount) : 0,
+    "Monto Ultimo Pago": lastPayment ? Math.round(Number(lastPayment.amount)) : 0,
     "Proximo Vencimiento": nextPendingInstallment ? dateLabel(nextPendingInstallment.dueDate) : "-",
     Estatus: statusLabel(credit.status, overdueCount > 0),
   };
@@ -211,6 +211,245 @@ export async function GET(request: NextRequest) {
   const type = searchParams.get("tipo") ?? "activos";
   const zoneFilter = searchParams.get("zona") ?? "all";
   const workbook = XLSX.utils.book_new();
+
+  if (type === "renovaciones") {
+    const [allClientCredits, defaultProfile] = await Promise.all([
+      prisma.credit.findMany({
+        where: {
+          status: { not: "cancelled" },
+          ...(zoneFilter !== "all" ? { zoneId: zoneFilter } : {}),
+        },
+        include: {
+          client: true,
+          zone: true,
+          creator: true,
+          renewedFrom: true,
+        },
+        orderBy: [{ startDate: "asc" }, { creditNumber: "asc" }, { createdAt: "asc" }],
+      }),
+      prisma.profile.findFirst({
+        orderBy: { createdAt: "asc" },
+      }),
+    ]);
+
+    const creditsByClient = new Map<string, typeof allClientCredits>();
+    for (const c of allClientCredits) {
+      const list = creditsByClient.get(c.clientId) ?? [];
+      list.push(c);
+      creditsByClient.set(c.clientId, list);
+    }
+
+    type RenewalRow = {
+      credit: (typeof allClientCredits)[number];
+      previousCredit: (typeof allClientCredits)[number] | typeof allClientCredits[number]["renewedFrom"];
+      dateKey: string;
+      principalRenewed: number;
+      interestRenewed: number;
+      totalRenewed: number;
+      operatorName: string;
+    };
+
+    const renewalItems: RenewalRow[] = [];
+    for (const [, clientCredits] of Array.from(creditsByClient.entries())) {
+      clientCredits.forEach((credit, idx) => {
+        const isRenewal = Boolean(credit.renewedFromCreditId) || idx > 0;
+        if (!isRenewal) return;
+
+        const previousCredit = credit.renewedFrom ?? (idx > 0 ? clientCredits[idx - 1] : null);
+        const dateKey = dateLabel(credit.startDate);
+        const operatorName =
+          credit.creator?.fullName || defaultProfile?.fullName || "Operador principal";
+
+        renewalItems.push({
+          credit,
+          previousCredit,
+          dateKey,
+          principalRenewed: Math.round(Number(credit.principalAmount)),
+          interestRenewed: Math.round(Number(credit.interestAmount)),
+          totalRenewed: Math.round(Number(credit.totalAmount)),
+          operatorName,
+        });
+      });
+    }
+
+    renewalItems.sort(
+      (a, b) => new Date(b.credit.startDate).getTime() - new Date(a.credit.startDate).getTime(),
+    );
+
+    // 1. Por Dia ("cada dia cuanto renovo en dinero")
+    const byDayMap = new Map<
+      string,
+      {
+        Fecha: string;
+        "Cantidad Renovaciones": number;
+        "Dinero Renovado Capital ($)": number;
+        "Interes Generado ($)": number;
+        "Total Renovado c/ Interes ($)": number;
+        "Usuarios / Clientes": string[];
+      }
+    >();
+
+    for (const item of renewalItems) {
+      const existing = byDayMap.get(item.dateKey);
+      if (existing) {
+        existing["Cantidad Renovaciones"] += 1;
+        existing["Dinero Renovado Capital ($)"] += item.principalRenewed;
+        existing["Interes Generado ($)"] += item.interestRenewed;
+        existing["Total Renovado c/ Interes ($)"] += item.totalRenewed;
+        if (!existing["Usuarios / Clientes"].includes(item.credit.client.fullName)) {
+          existing["Usuarios / Clientes"].push(item.credit.client.fullName);
+        }
+      } else {
+        byDayMap.set(item.dateKey, {
+          Fecha: item.dateKey,
+          "Cantidad Renovaciones": 1,
+          "Dinero Renovado Capital ($)": item.principalRenewed,
+          "Interes Generado ($)": item.interestRenewed,
+          "Total Renovado c/ Interes ($)": item.totalRenewed,
+          "Usuarios / Clientes": [item.credit.client.fullName],
+        });
+      }
+    }
+
+    const byDayRows = Array.from(byDayMap.values())
+      .sort((a, b) => b.Fecha.localeCompare(a.Fecha))
+      .map((row) => ({
+        Fecha: row.Fecha,
+        "Cantidad Renovaciones": row["Cantidad Renovaciones"],
+        "Dinero Renovado Capital ($)": row["Dinero Renovado Capital ($)"],
+        "Interes Generado ($)": row["Interes Generado ($)"],
+        "Total Renovado c/ Interes ($)": row["Total Renovado c/ Interes ($)"],
+        "Usuarios / Clientes": row["Usuarios / Clientes"].join(", "),
+      }));
+
+    // 2. Por Usuario / Cliente ("por usuario un apartado mas")
+    const byUserMap = new Map<
+      string,
+      {
+        "Usuario / Cliente": string;
+        "Cedula / ID": string;
+        Telefono: string;
+        Direccion: string;
+        Zona: string;
+        Operador: string;
+        "Veces que Renovo": number;
+        "Dinero Total Renovado ($)": number;
+        "Total con Interes ($)": number;
+        "Ultima Fecha Renovacion": string;
+        "Historial Folios": string[];
+      }
+    >();
+
+    for (const item of renewalItems) {
+      const key = item.credit.clientId;
+      const prevFolio = item.previousCredit?.creditNumber
+        ? `#${item.previousCredit.creditNumber}`
+        : "Previo";
+      const newFolio = item.credit.creditNumber ? `#${item.credit.creditNumber}` : "-";
+      const folioLabel = `${prevFolio} -> ${newFolio} ($${item.principalRenewed})`;
+
+      const existing = byUserMap.get(key);
+      if (existing) {
+        existing["Veces que Renovo"] += 1;
+        existing["Dinero Total Renovado ($)"] += item.principalRenewed;
+        existing["Total con Interes ($)"] += item.totalRenewed;
+        if (item.dateKey > existing["Ultima Fecha Renovacion"]) {
+          existing["Ultima Fecha Renovacion"] = item.dateKey;
+        }
+        existing["Historial Folios"].push(folioLabel);
+      } else {
+        byUserMap.set(key, {
+          "Usuario / Cliente": item.credit.client.fullName,
+          "Cedula / ID": item.credit.client.identification || item.credit.client.clientNumber || "-",
+          Telefono: item.credit.client.phone || "-",
+          Direccion: item.credit.client.address,
+          Zona: item.credit.zone.name,
+          Operador: item.operatorName,
+          "Veces que Renovo": 1,
+          "Dinero Total Renovado ($)": item.principalRenewed,
+          "Total con Interes ($)": item.totalRenewed,
+          "Ultima Fecha Renovacion": item.dateKey,
+          "Historial Folios": [folioLabel],
+        });
+      }
+    }
+
+    const byUserRows = Array.from(byUserMap.values()).map((row) => ({
+      ...row,
+      "Historial Folios": row["Historial Folios"].join(" | "),
+    }));
+
+    // 3. Por Usuario Operador y Zona
+    const byOperatorMap = new Map<
+      string,
+      {
+        "Usuario Operador": string;
+        Zona: string;
+        "Cantidad Renovaciones": number;
+        "Dinero Renovado Capital ($)": number;
+        "Total con Interes ($)": number;
+      }
+    >();
+
+    for (const item of renewalItems) {
+      const key = `${item.operatorName}__${item.credit.zone.name}`;
+      const existing = byOperatorMap.get(key);
+      if (existing) {
+        existing["Cantidad Renovaciones"] += 1;
+        existing["Dinero Renovado Capital ($)"] += item.principalRenewed;
+        existing["Total con Interes ($)"] += item.totalRenewed;
+      } else {
+        byOperatorMap.set(key, {
+          "Usuario Operador": item.operatorName,
+          Zona: item.credit.zone.name,
+          "Cantidad Renovaciones": 1,
+          "Dinero Renovado Capital ($)": item.principalRenewed,
+          "Total con Interes ($)": item.totalRenewed,
+        });
+      }
+    }
+
+    const byOperatorRows = Array.from(byOperatorMap.values());
+
+    // 4. Detalle de cada renovacion
+    const detailRows = renewalItems.map((item) => ({
+      "Fecha Renovacion": item.dateKey,
+      "Folio Nuevo": item.credit.creditNumber ? `#${item.credit.creditNumber}` : "-",
+      "Folio Anterior": item.previousCredit?.creditNumber
+        ? `#${item.previousCredit.creditNumber}`
+        : "-",
+      "Usuario / Cliente": item.credit.client.fullName,
+      Telefono: item.credit.client.phone || "-",
+      Zona: item.credit.zone.name,
+      "Usuario Operador": item.operatorName,
+      "Monto Credito Anterior ($)": item.previousCredit
+        ? Math.round(Number(item.previousCredit.principalAmount))
+        : 0,
+      "Dinero Renovado Capital ($)": item.principalRenewed,
+      "Interes ($)": item.interestRenewed,
+      "Total Nuevo a Pagar ($)": item.totalRenewed,
+      "Valor Cuota ($)": Math.round(Number(item.credit.installmentAmount)),
+      "Total Cuotas": item.credit.installmentCount,
+      "Dia de Cobro": collectionDayLabel(
+        item.credit.type,
+        item.credit.weeklyCollectionDay,
+        item.credit.startDate,
+      ),
+      Estatus:
+        item.credit.status === "settled"
+          ? "Liquidado"
+          : item.credit.status === "delinquent"
+            ? "Con atraso"
+            : "Activo",
+    }));
+
+    addSheet(workbook, "Por Dia (Dinero Renovado)", byDayRows);
+    addSheet(workbook, "Por Usuario (Clientes)", byUserRows);
+    addSheet(workbook, "Por Operador y Zona", byOperatorRows);
+    addSheet(workbook, "Detalle Renovaciones", detailRows);
+
+    return workbookResponse(workbook, `renovaciones-${dateLabel(today)}.xlsx`);
+  }
 
   if (type === "pagos") {
     const from = parseDate(searchParams.get("desde"), today);
@@ -257,9 +496,9 @@ export async function GET(request: NextRequest) {
               : payment.credit.type === "biweekly"
                 ? "Quincenal"
                 : "Semanal",
-          "Abonado a Cuotas": Number(ordinaryApplied.toFixed(2)),
-          "Mora Pagada": Number(lateFeeApplied.toFixed(2)),
-          "Total Pagado": Number(payment.amount),
+          "Abonado a Cuotas": Math.round(ordinaryApplied),
+          "Mora Pagada": Math.round(lateFeeApplied),
+          "Total Pagado": Math.round(Number(payment.amount)),
           Metodo: payment.method,
           "Cuotas Aplicadas": payment.allocations
             .map((allocation) => `#${allocation.installment.installmentNumber}`)
@@ -370,15 +609,21 @@ export async function GET(request: NextRequest) {
                 : "Semanal",
           "Numero de Cuota": installment.installmentNumber,
           "Fecha Vencimiento Cuota": dateLabel(installment.dueDate),
-          "Monto Cuota": Number(installment.scheduledAmount),
-          Mora: Number(installment.lateFeeAmount),
-          "Abonado a Cuota": Math.min(Number(installment.paidAmount), Number(installment.scheduledAmount)),
-          "Mora Pagada": Math.max(Number(installment.paidAmount) - Number(installment.scheduledAmount), 0),
-          "Saldo Cuota": Math.max(
-            Number(installment.scheduledAmount) +
-              Number(installment.lateFeeAmount) -
-              Number(installment.paidAmount),
-            0,
+          "Monto Cuota": Math.round(Number(installment.scheduledAmount)),
+          Mora: Math.round(Number(installment.lateFeeAmount)),
+          "Abonado a Cuota": Math.round(
+            Math.min(Number(installment.paidAmount), Number(installment.scheduledAmount)),
+          ),
+          "Mora Pagada": Math.round(
+            Math.max(Number(installment.paidAmount) - Number(installment.scheduledAmount), 0),
+          ),
+          "Saldo Cuota": Math.round(
+            Math.max(
+              Number(installment.scheduledAmount) +
+                Number(installment.lateFeeAmount) -
+                Number(installment.paidAmount),
+              0,
+            ),
           ),
         })),
     );
@@ -405,7 +650,7 @@ export async function GET(request: NextRequest) {
         "Fecha de Otorgamiento": detailed["Fecha de Otorgamiento"],
         Capital: detailed["Capital Prestado"],
         "Interes pactado": detailed["Interes / Financiamiento"],
-        "Interes cobrado": Number(interestCollected.toFixed(2)),
+        "Interes cobrado": Math.round(interestCollected),
         "Pagos Hechos": detailed["Pagos Hechos"],
         "Pagos Atrasados": detailed["Pagos Atrasados"],
         "Abonado a Cuotas ($)": detailed["Abonado a Cuotas ($)"],
@@ -418,8 +663,14 @@ export async function GET(request: NextRequest) {
     addSheet(workbook, "Ganancias", rows);
     addSheet(workbook, "Resumen", [
       {
-        "Capital prestado": credits.reduce((total, credit) => total + Number(credit.principalAmount), 0),
-        "Interes pactado": credits.reduce((total, credit) => total + Number(credit.interestAmount), 0),
+        "Capital prestado": credits.reduce(
+          (total, credit) => total + Math.round(Number(credit.principalAmount)),
+          0,
+        ),
+        "Interes pactado": credits.reduce(
+          (total, credit) => total + Math.round(Number(credit.interestAmount)),
+          0,
+        ),
         "Abonado a cuotas": rows.reduce((total, row) => total + row["Abonado a Cuotas ($)"], 0),
         "Mora pagada": rows.reduce((total, row) => total + row["Mora Pagada ($)"], 0),
         "Saldo cartera": rows.reduce((total, row) => total + row["Saldo Pendiente ($)"], 0),
@@ -453,3 +704,4 @@ export async function GET(request: NextRequest) {
 
   return workbookResponse(workbook, `cartera-${dateLabel(today)}.xlsx`);
 }
+

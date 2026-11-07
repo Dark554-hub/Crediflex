@@ -16,7 +16,7 @@ type SettlementCredit = {
   installmentCount: number;
   type: "daily" | "weekly" | "biweekly";
   installments: SettlementInstallment[];
-  payments: SettlementPayment[];
+  payments?: SettlementPayment[];
 };
 
 function startOfTodayUtc() {
@@ -31,7 +31,7 @@ function daysBetween(a: Date, b: Date) {
 }
 
 function roundCurrency(amount: number) {
-  return Math.round(amount * 100) / 100;
+  return Math.round(amount);
 }
 
 export function calculateSettlement(credit: SettlementCredit) {
@@ -59,10 +59,9 @@ export function calculateSettlement(credit: SettlementCredit) {
 
   const referenceInstallment = installments[referenceIndex] ?? installments[0];
   const elapsedPeriods = Math.min(referenceIndex + 1, credit.installmentCount);
-  const totalPaymentsMade = credit.payments.reduce(
-    (total, payment) => total + Number(payment.amount),
-    0,
-  );
+  const totalPaymentsMade = credit.payments
+    ? credit.payments.reduce((total, payment) => total + Number(payment.amount), 0)
+    : installments.reduce((total, inst) => total + Number(inst.paidAmount), 0);
   const principal = Number(credit.principalAmount);
   const termInterest = Number(credit.interestAmount);
   const totalDebt = Number(credit.totalAmount);

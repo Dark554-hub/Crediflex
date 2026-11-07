@@ -139,20 +139,27 @@ export async function GET(
       );
     }
   }
+  const isSettlementPayment =
+    Boolean(payment.notes?.toLowerCase().includes("liquidacion")) ||
+    payment.credit.status === "settled";
   const paymentDateTime = new Date(payment.paymentDate).getTime();
-  const pagosAtrasados = payment.credit.installments.filter((inst) => {
-    const dueTime = new Date(inst.dueDate).getTime();
-    const paid = paidByInstallment.get(inst.id) ?? 0;
-    const scheduled = Number(inst.scheduledAmount);
-    return dueTime < paymentDateTime && paid + 0.01 < scheduled;
-  }).length;
+  const pagosAtrasados = isSettlementPayment
+    ? 0
+    : payment.credit.installments.filter((inst) => {
+        const dueTime = new Date(inst.dueDate).getTime();
+        const paid = paidByInstallment.get(inst.id) ?? 0;
+        const scheduled = Number(inst.scheduledAmount);
+        return dueTime < paymentDateTime && paid + 0.01 < scheduled;
+      }).length;
 
   const totalAmount = Number(payment.credit.totalAmount);
-  const pendingBalance = Math.max(totalAmount - cumulativeOrdinaryPaid, 0);
+  const pendingBalance = isSettlementPayment ? 0 : Math.max(totalAmount - cumulativeOrdinaryPaid, 0);
   const installmentAmount = Number(payment.credit.installmentAmount) || 1;
   const totalInstallments = Number(payment.credit.installmentCount);
-  const paidInstallments = Math.min(cumulativeOrdinaryPaid / installmentAmount, totalInstallments);
-  const abonadasInstallments = ordinaryTotal / installmentAmount;
+  const paidInstallments = isSettlementPayment
+    ? totalInstallments
+    : Math.min(Math.round(cumulativeOrdinaryPaid / installmentAmount), totalInstallments);
+  const abonadasInstallments = Math.max(Math.round(ordinaryTotal / installmentAmount), 1);
 
   let y = pageHeight - 40;
 
@@ -230,7 +237,7 @@ export async function GET(
   drawText(page, "Cuotas Pagadas:", marginX, y, regular, 11);
   drawRightText(
     page,
-    `${paidInstallments.toFixed(1)} de ${totalInstallments.toFixed(1)}`,
+    `${Math.round(paidInstallments)} de ${Math.round(totalInstallments)}`,
     rightX,
     y,
     regular,
@@ -239,7 +246,7 @@ export async function GET(
   y -= 17;
 
   drawText(page, "Cuotas abonadas:", marginX, y, regular, 11);
-  drawRightText(page, abonadasInstallments.toFixed(1), rightX, y, regular, 11);
+  drawRightText(page, String(Math.round(abonadasInstallments)), rightX, y, regular, 11);
   y -= 18;
 
   // Pagos atrasados row with traffic-light color

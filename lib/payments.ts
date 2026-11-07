@@ -16,6 +16,11 @@ export async function getPaymentFormData(creditId: string) {
           installmentNumber: "asc",
         },
       },
+      payments: {
+        where: {
+          cancelledAt: null,
+        },
+      },
     },
   });
 }

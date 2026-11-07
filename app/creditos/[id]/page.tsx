@@ -81,7 +81,7 @@ export default async function CreditDetailPage({
             ["Fecha", formatDate(credit.startDate)],
             ["Vencimiento", formatDate(credit.expectedEndDate)],
             ["Monto", formatCurrency(credit.principalAmount)],
-            ["Tasa de Interes", isExpress ? "5.00% semanal" : `${(Number(credit.interestRate) * 100).toFixed(2)}%`],
+            ["Tasa de Interes", isExpress ? "5% semanal" : `${Math.round(Number(credit.interestRate) * 100)}%`],
             ["Intereses", formatCurrency(credit.interestAmount)],
             ["Total", formatCurrency(credit.totalAmount)],
             ["Frecuencia de Pago", typeLabels[credit.type]],
@@ -211,7 +211,12 @@ export default async function CreditDetailPage({
       </section>
 
       <div id="liquidar">
-        <SettlementCalculator settlement={settlement} lateFeeAmount={pendingLateFeeAmount} />
+        <SettlementCalculator
+          creditId={credit.id}
+          isSettled={credit.status === "settled" || credit.status === "cancelled"}
+          settlement={settlement}
+          lateFeeAmount={pendingLateFeeAmount}
+        />
       </div>
 
       {credit.status === "settled" ? (
@@ -328,12 +333,19 @@ export default async function CreditDetailPage({
                   sum + p.allocations.reduce((allocSum, alloc) => allocSum + Number(alloc.amountApplied), 0),
                 0,
               );
+              const isSettlementPayment =
+                Boolean(payment.notes?.toLowerCase().includes("liquidacion")) ||
+                (credit.status === "settled" && payment.id === credit.payments[0]?.id);
               const totalAmount = Number(credit.totalAmount);
-              const pendingBalanceAfterPayment = Math.max(totalAmount - cumulativeOrdinaryPaid, 0);
+              const pendingBalanceAfterPayment = isSettlementPayment
+                ? 0
+                : Math.max(totalAmount - cumulativeOrdinaryPaid, 0);
               const installmentAmount = Number(credit.installmentAmount) || 1;
               const totalInstallments = Number(credit.installmentCount);
-              const paidInstallmentsCount = Math.min(cumulativeOrdinaryPaid / installmentAmount, totalInstallments);
-              const abonadasInstallmentsCount = ordinaryTotal / installmentAmount;
+              const paidInstallmentsCount = isSettlementPayment
+                ? totalInstallments
+                : Math.min(Math.round(cumulativeOrdinaryPaid / installmentAmount), totalInstallments);
+              const abonadasInstallmentsCount = Math.max(Math.round(ordinaryTotal / installmentAmount), 1);
 
               const paidByInstallment = new Map<string, number>();
               for (const p of paymentsUpToThis) {
@@ -345,12 +357,14 @@ export default async function CreditDetailPage({
                 }
               }
               const paymentDateTime = new Date(payment.paymentDate).getTime();
-              const pagosAtrasados = credit.installments.filter((inst) => {
-                const dueTime = new Date(inst.dueDate).getTime();
-                const paid = paidByInstallment.get(inst.id) ?? 0;
-                const scheduled = Number(inst.scheduledAmount);
-                return dueTime < paymentDateTime && paid + 0.01 < scheduled;
-              }).length;
+              const pagosAtrasados = isSettlementPayment
+                ? 0
+                : credit.installments.filter((inst) => {
+                    const dueTime = new Date(inst.dueDate).getTime();
+                    const paid = paidByInstallment.get(inst.id) ?? 0;
+                    const scheduled = Number(inst.scheduledAmount);
+                    return dueTime < paymentDateTime && paid + 0.01 < scheduled;
+                  }).length;
 
               const ticketData: PaymentTicketData = {
                 paymentId: payment.id,
@@ -365,8 +379,8 @@ export default async function CreditDetailPage({
                 mora: formatCurrency(lateFeeTotal),
                 total: formatCurrency(payment.amount),
                 saldo: formatCurrency(pendingBalanceAfterPayment),
-                cuotasPagadas: `${paidInstallmentsCount.toFixed(1)} de ${totalInstallments.toFixed(1)}`,
-                cuotasAbonadas: abonadasInstallmentsCount.toFixed(1),
+                cuotasPagadas: `${Math.round(paidInstallmentsCount)} de ${Math.round(totalInstallments)}`,
+                cuotasAbonadas: String(Math.round(abonadasInstallmentsCount)),
                 pagosAtrasados,
                 diaPrestado: formatShortDate(credit.startDate),
                 reciboGenerado: formatShortDate(payment.paymentDate),
