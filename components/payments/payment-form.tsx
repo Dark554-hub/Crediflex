@@ -105,8 +105,6 @@ export function PaymentForm({ credit }: PaymentFormProps) {
   const totalToPay = Math.round(Math.max(baseAmount + lateFeeValue, 0));
   const isSettlement =
     selectedAmount === "settlement" ||
-    selectedAmount === "total" ||
-    selectedAmount === "debt" ||
     (selectedAmount === "other" && settleWithOtherAmount);
 
   return (

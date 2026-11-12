@@ -100,11 +100,13 @@ export async function createPaymentAction(
         const appliedOrdinaryCents = Math.min(remainingCents, ordinaryPendingCents);
         remainingCents = Math.max(remainingCents - appliedOrdinaryCents, 0);
 
-        allocations.push({
-          installmentId: installment.id,
-          amountApplied: toDecimalString(appliedOrdinaryCents / 100),
-          lateFeeApplied: "0.00",
-        });
+        if (appliedOrdinaryCents > 0) {
+          allocations.push({
+            installmentId: installment.id,
+            amountApplied: toDecimalString(appliedOrdinaryCents / 100),
+            lateFeeApplied: "0.00",
+          });
+        }
 
         installmentUpdates.push(
           prisma.creditInstallment.update({
@@ -132,14 +134,24 @@ export async function createPaymentAction(
         );
       }
 
-      if (remainingCents > 0 && allocations.length > 0) {
-        const lastAlloc = allocations[allocations.length - 1];
-        const extraLateFeeCents = Math.min(remainingCents, pendingAdditionalLateFeeCents);
-        const extraOrdinaryCents = remainingCents - extraLateFeeCents;
-        lastAlloc.amountApplied = toDecimalString(
-          (Math.round(Number(lastAlloc.amountApplied) * 100) + extraOrdinaryCents) / 100,
-        );
-        lastAlloc.lateFeeApplied = toDecimalString(extraLateFeeCents / 100);
+      if (remainingCents > 0) {
+        if (allocations.length > 0) {
+          const lastAlloc = allocations[allocations.length - 1];
+          const extraLateFeeCents = Math.min(remainingCents, pendingAdditionalLateFeeCents);
+          const extraOrdinaryCents = remainingCents - extraLateFeeCents;
+          lastAlloc.amountApplied = toDecimalString(
+            (Math.round(Number(lastAlloc.amountApplied) * 100) + extraOrdinaryCents) / 100,
+          );
+          lastAlloc.lateFeeApplied = toDecimalString(
+            (Math.round(Number(lastAlloc.lateFeeApplied) * 100) + extraLateFeeCents) / 100,
+          );
+        } else if (credit.installments.length > 0) {
+          allocations.push({
+            installmentId: credit.installments[0].id,
+            amountApplied: toDecimalString(remainingCents / 100),
+            lateFeeApplied: "0.00",
+          });
+        }
       }
 
       paidInstallmentsInThisPayment = credit.installments.length;
@@ -169,11 +181,13 @@ export async function createPaymentAction(
           paidInstallmentsInThisPayment += 1;
         }
 
-        allocations.push({
-          installmentId: installment.id,
-          amountApplied: toDecimalString(ordinaryAppliedCents / 100),
-          lateFeeApplied: toDecimalString(lateFeeAppliedCents / 100),
-        });
+        if (ordinaryAppliedCents > 0 || lateFeeAppliedCents > 0) {
+          allocations.push({
+            installmentId: installment.id,
+            amountApplied: toDecimalString(ordinaryAppliedCents / 100),
+            lateFeeApplied: toDecimalString(lateFeeAppliedCents / 100),
+          });
+        }
 
         installmentUpdates.push(
           prisma.creditInstallment.update({
@@ -209,8 +223,25 @@ export async function createPaymentAction(
       }
     }
 
-    if (allocations.length === 0) {
-      throw new Error("No hay cuotas pendientes para aplicar este pago.");
+    // FILTRO DE SEGURIDAD ABSOLUTO:
+    // Postgres prohíbe registrar asignaciones donde amount_applied <= 0 Y late_fee_applied <= 0
+    // (restricción check "payment_allocations_positive_amounts").
+    const validAllocations = allocations.filter((alloc) => {
+      const amt = Number(alloc.amountApplied);
+      const fee = Number(alloc.lateFeeApplied);
+      return (Number.isFinite(amt) && amt > 0) || (Number.isFinite(fee) && fee > 0);
+    });
+
+    if (validAllocations.length === 0) {
+      if (credit.installments.length > 0 && amount > 0) {
+        validAllocations.push({
+          installmentId: credit.installments[0].id,
+          amountApplied: toDecimalString(amount),
+          lateFeeApplied: "0.00",
+        });
+      } else {
+        throw new Error("No hay cuotas pendientes para aplicar este pago.");
+      }
     }
 
     const willSettleCredit =
@@ -234,7 +265,7 @@ export async function createPaymentAction(
         method,
         notes: notes || (isSettlement ? "Liquidacion total del prestamo" : null),
         allocations: {
-          create: allocations,
+          create: validAllocations,
         },
       },
     });
@@ -266,8 +297,14 @@ export async function createPaymentAction(
     const [payment] = await prisma.$transaction(operations);
     paymentId = (payment as { id: string }).id;
   } catch (error) {
+    console.error("Error creating payment:", error);
     return {
-      error: error instanceof Error ? error.message : "No se pudo registrar el pago.",
+      error:
+        error instanceof Error
+          ? error.message.includes("check constraint") || error.message.includes("ConnectorError")
+            ? "Ocurrió un error al procesar el desglose del pago en el sistema. Intenta de nuevo."
+            : error.message
+          : "No se pudo registrar el pago.",
     };
   }
 

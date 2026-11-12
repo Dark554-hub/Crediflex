@@ -162,6 +162,47 @@ export async function cancelLastPaymentAction(formData: FormData) {
         },
       }),
     );
+
+    // Si fue liquidación, restaurar también las cuotas que no tenían asignación directa
+    const allCreditInstallments = await prisma.creditInstallment.findMany({
+      where: { creditId: payment.creditId },
+      include: {
+        allocations: {
+          include: { payment: true },
+        },
+      },
+    });
+
+    for (const inst of allCreditInstallments) {
+      const activeAllocs = inst.allocations.filter(
+        (item) => item.paymentId !== payment.id && item.payment.cancelledAt === null,
+      );
+      const recomputedPaid = activeAllocs.reduce(
+        (sum, item) => sum + Number(item.amountApplied) + Number(item.lateFeeApplied),
+        0,
+      );
+      const scheduled = Number(inst.scheduledAmount);
+      const newStatus =
+        recomputedPaid <= 0.01 ? "pending" : recomputedPaid + 0.01 >= scheduled ? "paid" : "partial";
+
+      operations.push(
+        prisma.creditInstallment.update({
+          where: { id: inst.id },
+          data: {
+            paidAmount: recomputedPaid.toFixed(2),
+            status: newStatus,
+            paidAt: newStatus === "paid" ? inst.paidAt : null,
+          },
+        }),
+        prisma.collectionItem.updateMany({
+          where: { installmentId: inst.id },
+          data: {
+            collectedAmount: recomputedPaid.toFixed(2),
+            status: newStatus,
+          },
+        }),
+      );
+    }
   }
 
   await prisma.$transaction(operations);
@@ -230,11 +271,13 @@ export async function settleCreditAction(formData: FormData) {
     const appliedOrdinaryCents = Math.min(remainingCents, ordinaryPendingCents);
     remainingCents = Math.max(remainingCents - appliedOrdinaryCents, 0);
 
-    allocations.push({
-      installmentId: installment.id,
-      amountApplied: (appliedOrdinaryCents / 100).toFixed(2),
-      lateFeeApplied: "0.00",
-    });
+    if (appliedOrdinaryCents > 0) {
+      allocations.push({
+        installmentId: installment.id,
+        amountApplied: (appliedOrdinaryCents / 100).toFixed(2),
+        lateFeeApplied: "0.00",
+      });
+    }
 
     operations.push(
       prisma.creditInstallment.update({
@@ -258,10 +301,34 @@ export async function settleCreditAction(formData: FormData) {
   }
 
   // Si sobro algo por mora o cargo de liquidacion, sumarlo a la ultima cuota
-  if (remainingCents > 0 && allocations.length > 0) {
-    const lastAlloc = allocations[allocations.length - 1];
-    const currentApplied = Math.round(Number(lastAlloc.amountApplied) * 100);
-    lastAlloc.amountApplied = ((currentApplied + remainingCents) / 100).toFixed(2);
+  if (remainingCents > 0) {
+    if (allocations.length > 0) {
+      const lastAlloc = allocations[allocations.length - 1];
+      const currentApplied = Math.round(Number(lastAlloc.amountApplied) * 100);
+      lastAlloc.amountApplied = ((currentApplied + remainingCents) / 100).toFixed(2);
+    } else if (credit.installments.length > 0) {
+      allocations.push({
+        installmentId: credit.installments[0].id,
+        amountApplied: (remainingCents / 100).toFixed(2),
+        lateFeeApplied: "0.00",
+      });
+    }
+  }
+
+  // FILTRO DE SEGURIDAD ABSOLUTO:
+  // Postgres prohíbe registrar asignaciones donde amount_applied <= 0 Y late_fee_applied <= 0
+  const validAllocations = allocations.filter((alloc) => {
+    const amt = Number(alloc.amountApplied);
+    const fee = Number(alloc.lateFeeApplied);
+    return (Number.isFinite(amt) && amt > 0) || (Number.isFinite(fee) && fee > 0);
+  });
+
+  if (validAllocations.length === 0 && credit.installments.length > 0 && settlementAmount > 0) {
+    validAllocations.push({
+      installmentId: credit.installments[0].id,
+      amountApplied: settlementAmount.toFixed(2),
+      lateFeeApplied: "0.00",
+    });
   }
 
   const paymentCreate = prisma.payment.create({
@@ -273,7 +340,7 @@ export async function settleCreditAction(formData: FormData) {
       method,
       notes: "Liquidacion total del prestamo",
       allocations: {
-        create: allocations,
+        create: validAllocations,
       },
     },
   });
