@@ -64,6 +64,15 @@ export async function createPaymentAction(
               in: ["pending", "partial", "overdue"],
             },
           },
+          include: {
+            allocations: {
+              where: {
+                payment: {
+                  cancelledAt: null,
+                },
+              },
+            },
+          },
           orderBy: {
             installmentNumber: "asc",
           },
@@ -161,21 +170,36 @@ export async function createPaymentAction(
 
         const scheduledCents = Math.round(Number(installment.scheduledAmount) * 100);
         const existingLateFeeCents = Math.round(Number(installment.lateFeeAmount) * 100);
-        const paidCents = Math.round(Number(installment.paidAmount) * 100);
+        const paidCents = Math.min(
+          Math.round(Number(installment.paidAmount) * 100),
+          scheduledCents,
+        );
+        const paidLateFeeCents = installment.allocations.reduce(
+          (sum, a) => sum + Math.round(Number(a.lateFeeApplied) * 100),
+          0,
+        );
+
         const extraLateFeeForInstallmentCents =
           pendingAdditionalLateFeeCents > 0 ? pendingAdditionalLateFeeCents : 0;
-        const lateFeeCents = existingLateFeeCents + extraLateFeeForInstallmentCents;
+        const totalLateFeeCents = existingLateFeeCents + extraLateFeeForInstallmentCents;
 
-        const installmentBalanceCents = Math.max(scheduledCents + lateFeeCents - paidCents, 0);
+        const ordinaryPendingCents = Math.max(scheduledCents - paidCents, 0);
+        const lateFeePendingCents = Math.max(totalLateFeeCents - paidLateFeeCents, 0);
+        const installmentBalanceCents = ordinaryPendingCents + lateFeePendingCents;
         const appliedCents = Math.min(remainingCents, installmentBalanceCents);
 
         if (appliedCents <= 0) continue;
 
-        const ordinaryPendingCents = Math.max(scheduledCents - paidCents, 0);
         const ordinaryAppliedCents = Math.min(appliedCents, ordinaryPendingCents);
-        const lateFeeAppliedCents = appliedCents - ordinaryAppliedCents;
-        const newPaidCents = paidCents + appliedCents;
-        const isPaid = newPaidCents >= scheduledCents + lateFeeCents;
+        const lateFeeAppliedCents = Math.min(appliedCents - ordinaryAppliedCents, lateFeePendingCents);
+
+        // paidAmount en la cuota representa EXCLUSIVAMENTE el abono a la cuota ordinaria
+        // NUNCA debe incluir mora ni exceder scheduledAmount
+        const newPaidCents = Math.min(paidCents + ordinaryAppliedCents, scheduledCents);
+
+        const isOrdinaryPaid = newPaidCents >= scheduledCents;
+        const isLateFeePaid = paidLateFeeCents + lateFeeAppliedCents >= totalLateFeeCents;
+        const isPaid = isOrdinaryPaid && isLateFeePaid;
 
         if (isPaid) {
           paidInstallmentsInThisPayment += 1;
@@ -193,7 +217,7 @@ export async function createPaymentAction(
           prisma.creditInstallment.update({
             where: { id: installment.id },
             data: {
-              lateFeeAmount: toDecimalString(lateFeeCents / 100),
+              lateFeeAmount: toDecimalString(totalLateFeeCents / 100),
               paidAmount: toDecimalString(newPaidCents / 100),
               status: isPaid ? "paid" : "partial",
               paidAt: isPaid ? now : null,

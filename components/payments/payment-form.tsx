@@ -55,10 +55,12 @@ export function PaymentForm({ credit }: PaymentFormProps) {
     () =>
       Math.round(
         credit.installments.reduce((total, installment) => {
-          const balance =
-            Number(installment.scheduledAmount) +
-            Number(installment.lateFeeAmount) -
-            Number(installment.paidAmount);
+          const ordinaryPending = Math.max(
+            Number(installment.scheduledAmount) -
+              Math.min(Number(installment.paidAmount), Number(installment.scheduledAmount)),
+            0,
+          );
+          const balance = ordinaryPending + Number(installment.lateFeeAmount);
           return total + Math.max(balance, 0);
         }, 0),
       ),
@@ -69,10 +71,12 @@ export function PaymentForm({ credit }: PaymentFormProps) {
       Math.round(
         credit.installments.reduce((total, installment) => {
           const due = new Date(installment.dueDate);
-          const balance =
-            Number(installment.scheduledAmount) +
-            Number(installment.lateFeeAmount) -
-            Number(installment.paidAmount);
+          const ordinaryPending = Math.max(
+            Number(installment.scheduledAmount) -
+              Math.min(Number(installment.paidAmount), Number(installment.scheduledAmount)),
+            0,
+          );
+          const balance = ordinaryPending + Number(installment.lateFeeAmount);
           return due.getTime() < todayTime ? total + Math.max(balance, 0) : total;
         }, 0),
       ),
@@ -81,13 +85,28 @@ export function PaymentForm({ credit }: PaymentFormProps) {
   const currentBalance = useMemo(() => {
     const next = credit.installments[0];
     if (!next) return 0;
+    const ordinaryPending = Math.max(
+      Number(next.scheduledAmount) -
+        Math.min(Number(next.paidAmount), Number(next.scheduledAmount)),
+      0,
+    );
     return Math.round(
-      Math.max(Number(next.scheduledAmount) + Number(next.lateFeeAmount) - Number(next.paidAmount), 0),
+      Math.max(ordinaryPending + Number(next.lateFeeAmount), 0),
     );
   }, [credit.installments]);
-  const debtTotal = Math.round(
-    Number(credit.totalAmount) -
-      credit.installments.reduce((total, installment) => total + Number(installment.paidAmount), 0),
+  const debtTotal = useMemo(
+    () =>
+      Math.round(
+        credit.installments.reduce((total, installment) => {
+          const ordinaryPending = Math.max(
+            Number(installment.scheduledAmount) -
+              Math.min(Number(installment.paidAmount), Number(installment.scheduledAmount)),
+            0,
+          );
+          return total + ordinaryPending;
+        }, 0),
+      ),
+    [credit.installments],
   );
   const settlementCalc = useMemo(() => calculateSettlement(credit), [credit]);
   const settlementAmount = Math.round(settlementCalc.settlementBeforeDiscount);

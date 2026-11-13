@@ -17,14 +17,12 @@ function installmentBalance(installment: {
   lateFeeAmount: unknown;
   paidAmount: unknown;
 }) {
-  // Saldo de cuota = cuota ordinaria + mora registrada - pagos aplicados.
-  // Se limita a cero para evitar saldos negativos cuando una cuota ya fue cubierta.
-  return Math.max(
-    Number(installment.scheduledAmount) +
-      Number(installment.lateFeeAmount) -
-      Number(installment.paidAmount),
+  const ordinaryPending = Math.max(
+    Number(installment.scheduledAmount) -
+      Math.min(Number(installment.paidAmount), Number(installment.scheduledAmount)),
     0,
   );
+  return Math.max(ordinaryPending + Number(installment.lateFeeAmount), 0);
 }
 
 export async function getHomeStats() {

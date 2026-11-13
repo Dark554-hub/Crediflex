@@ -144,7 +144,12 @@ type ProfileInstallment = {
 };
 
 function installmentBalance(item: ProfileInstallment) {
-  return Math.max(Number(item.scheduledAmount) + Number(item.lateFeeAmount) - Number(item.paidAmount), 0);
+  if (item.status === "paid") return 0;
+  const ordinaryPending = Math.max(
+    Number(item.scheduledAmount) - Math.min(Number(item.paidAmount), Number(item.scheduledAmount)),
+    0,
+  );
+  return Math.max(ordinaryPending + Number(item.lateFeeAmount), 0);
 }
 
 function creditPending(installments: ProfileInstallment[]) {

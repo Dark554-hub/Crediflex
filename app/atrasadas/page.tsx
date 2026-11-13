@@ -21,10 +21,12 @@ export default async function OverduePage() {
       firstDueDate: Date;
     }>
   >((groups, installment) => {
-    const balance =
-      Number(installment.scheduledAmount) +
-      Number(installment.lateFeeAmount) -
-      Number(installment.paidAmount);
+    const ordinaryPending = Math.max(
+      Number(installment.scheduledAmount) -
+        Math.min(Number(installment.paidAmount), Number(installment.scheduledAmount)),
+      0,
+    );
+    const balance = Math.max(ordinaryPending + Number(installment.lateFeeAmount), 0);
     const existing = groups.find((group) => group.clientId === installment.credit.clientId);
 
     if (existing) {

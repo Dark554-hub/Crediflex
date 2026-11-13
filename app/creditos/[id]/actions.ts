@@ -124,12 +124,15 @@ export async function cancelLastPaymentAction(formData: FormData) {
     const remainingActiveAllocations = allocation.installment.allocations.filter(
       (item) => item.paymentId !== payment.id && item.payment.cancelledAt === null,
     );
-    const recomputedPaidAmount = remainingActiveAllocations.reduce(
-      (sum, item) => sum + Number(item.amountApplied) + Number(item.lateFeeApplied),
-      0,
+    const scheduled = Number(allocation.installment.scheduledAmount);
+    const recomputedPaidAmount = Math.min(
+      remainingActiveAllocations.reduce(
+        (sum, item) => sum + Number(item.amountApplied),
+        0,
+      ),
+      scheduled,
     );
     const newPaidAmount = Math.max(recomputedPaidAmount, 0);
-    const scheduled = Number(allocation.installment.scheduledAmount);
     const newStatus =
       newPaidAmount <= 0.01 ? "pending" : newPaidAmount + 0.01 >= scheduled ? "paid" : "partial";
 
@@ -177,11 +180,14 @@ export async function cancelLastPaymentAction(formData: FormData) {
       const activeAllocs = inst.allocations.filter(
         (item) => item.paymentId !== payment.id && item.payment.cancelledAt === null,
       );
-      const recomputedPaid = activeAllocs.reduce(
-        (sum, item) => sum + Number(item.amountApplied) + Number(item.lateFeeApplied),
-        0,
-      );
       const scheduled = Number(inst.scheduledAmount);
+      const recomputedPaid = Math.min(
+        activeAllocs.reduce(
+          (sum, item) => sum + Number(item.amountApplied),
+          0,
+        ),
+        scheduled,
+      );
       const newStatus =
         recomputedPaid <= 0.01 ? "pending" : recomputedPaid + 0.01 >= scheduled ? "paid" : "partial";
 

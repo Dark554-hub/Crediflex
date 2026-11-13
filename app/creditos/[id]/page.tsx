@@ -53,15 +53,18 @@ export default async function CreditDetailPage({
     notFound();
   }
 
-  const paidAmount = credit.installments.reduce(
-    (total, installment) => total + Number(installment.paidAmount),
+  const paidOrdinaryAmount = credit.installments.reduce(
+    (total, installment) =>
+      total + Math.min(Number(installment.paidAmount), Number(installment.scheduledAmount)),
     0,
   );
-  const pendingAmount = Number(credit.totalAmount) - paidAmount;
+  const pendingAmount = Math.max(Number(credit.totalAmount) - paidOrdinaryAmount, 0);
   const pendingLateFeeAmount = credit.installments.reduce((total, installment) => {
     const lateFee = Number(installment.lateFeeAmount);
-    const ordinaryPending = Math.max(Number(installment.scheduledAmount) - Number(installment.paidAmount), 0);
-    return total + (ordinaryPending <= 0 ? lateFee : 0);
+    const paidLateFee = installment.allocations
+      .filter((a) => a.payment.cancelledAt === null)
+      .reduce((sum, a) => sum + Number(a.lateFeeApplied), 0);
+    return total + Math.max(lateFee - paidLateFee, 0);
   }, 0);
   const settlement = calculateSettlement(credit);
   const isExpress = credit.productType === "express";
@@ -444,7 +447,9 @@ export default async function CreditDetailPage({
                   <td className="px-3 py-3 font-bold text-ink">
                     {formatCurrency(installment.scheduledAmount)}
                   </td>
-                  <td className="px-3 py-3 text-stone-700">{formatCurrency(installment.paidAmount)}</td>
+                  <td className="px-3 py-3 text-stone-700">
+                    {formatCurrency(Math.min(Number(installment.paidAmount), Number(installment.scheduledAmount)))}
+                  </td>
                   <td className="py-3 pl-3">
                     <InstallmentStatusBadge status={installment.status} />
                   </td>
